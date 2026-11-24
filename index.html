@@ -231,6 +231,14 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 .secao{border-top:1px solid var(--linha);margin-top:20px;padding-top:6px}
 .secao h4{margin:10px 0 4px;font-weight:900}
 .credito{font-size:.75rem;color:var(--tinta-2);margin-top:6px}
+.btn-foto-ia{justify-content:flex-start;gap:14px;padding:12px 18px;margin-bottom:10px;text-align:left}
+.btn-foto-ia span{display:flex;flex-direction:column;line-height:1.15}
+.btn-foto-ia small{font-weight:400;font-size:.8rem;opacity:.85}
+.girando-peq{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:gira .8s linear infinite;vertical-align:-2px;margin-right:4px}
+.campo.auto{border-color:var(--verde);background:var(--verde-suave)}
+.opcoes button{position:relative}
+.tag-sua{position:absolute;left:3px;bottom:3px;background:var(--tinta);color:var(--fundo);font-size:.62rem;font-weight:900;border-radius:5px;padding:0 5px}
+@media (prefers-reduced-motion: reduce){.girando-peq,.foto-mini .girando{animation-duration:2.4s}}
 </style>
 </head>
 <body>
@@ -444,16 +452,16 @@ async function guardarFoto(url){
     return await reduzirImagem(await r.blob());
   }catch(e){ return url; }
 }
-function reduzirImagem(blob){
+function reduzirImagem(blob, max = 400, qualidade = .74){
   return new Promise((ok, falha) => {
     const img = new Image(), u = URL.createObjectURL(blob);
     img.onload = () => {
-      const max = 400, k = Math.min(1, max / Math.max(img.width, img.height));
+      const k = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas");
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
       g.drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(u); ok(c.toDataURL("image/jpeg", .74));
+      URL.revokeObjectURL(u); ok(c.toDataURL("image/jpeg", qualidade));
     };
     img.onerror = () => { URL.revokeObjectURL(u); falha(); };
     img.src = u;
@@ -575,7 +583,9 @@ async function abrirScanner(){
       <input class="campo" id="codManual" inputmode="numeric" placeholder="Ex.: 7891000100103" autocomplete="off">
       <button class="btn btn-pri" style="flex:none" data-acao="usarCodigo">OK</button>
     </div>
-    <p class="dica">Leitor de código USB ou Bluetooth também funciona: toque no campo e bipe.</p>`, { tipo:"scanner" });
+    <p class="dica">Leitor de código USB ou Bluetooth também funciona: toque no campo e bipe.</p>
+    <div class="ou">sem código de barras?</div>
+    <button class="btn btn-sec btn-bloco" data-acao="fotoSemCodigo">Fotografar o produto</button>`, { tipo:"scanner" });
   if(!window.Html5Qrcode){ mostrarErroCamera(); return; }
   try{
     const F = window.Html5QrcodeSupportedFormats;
@@ -616,28 +626,33 @@ function tratarCodigo(codigo){
 }
 
 /* ===== formulário com preenchimento automático ===== */
-let fotoTemp = null, buscaForm = null, fotoManual = false;
+let fotoTemp = null, buscaForm = null, fotoManual = false, fotoPropria = null;
 const ICONE_CAM = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
 function mostrarFoto(){
   const el = $("#fotoMini"); if(!el) return;
   const f = urlSegura(fotoTemp);
   el.innerHTML = f ? `<img src="${esc(f)}" alt="">` : ICONE_CAM;
-  const b = $("#btnTirar"); if(b) b.textContent = f ? "Trocar por foto da câmera" : "Tirar foto";
+  const b = $("#btnTirar"); if(b) b.textContent = f ? "Tirar outra foto" : "Tirar foto";
 }
 function carregandoFoto(on){ const el = $("#fotoMini"); if(el && on) el.innerHTML = `<span class="girando" aria-label="Procurando foto"></span>`; else mostrarFoto(); }
 function msgBusca(html, tipo){ const m = $("#msgBusca"); if(m){ m.className = tipo || "dica"; m.innerHTML = html; } }
 
 function abrirForm({ codigo = "", id = null } = {}){
   const p = id ? produtos.get(id) : null;
-  fotoTemp = p ? p.foto || null : null; fotoManual = false;
+  fotoTemp = p ? p.foto || null : null; fotoManual = false; fotoPropria = null;
   const tam = p ? lerTamanho(p.tamanho) : null;
   abrirFolha(`${topoFolha(p ? "Editar produto" : "Novo produto")}
-    <p id="msgBusca" class="dica" style="margin-top:-4px">${!p && codigo ? `Código <b>${esc(codigo)}</b>` : ""}</p>
+    <button class="btn btn-pri btn-bloco btn-foto-ia" data-acao="tirarFoto">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      <span>Fotografar produto<small>o app preenche o resto sozinho</small></span></button>
+    <p id="msgBusca" class="dica">${!p && codigo ? `Código <b>${esc(codigo)}</b>` : ""}</p>
     <div class="foto-pegar">
       <div class="foto-mini" id="fotoMini"></div>
       <div class="foto-botoes">
         <button class="btn btn-sec btn-peq" data-acao="buscarFoto" id="btnBuscarFoto">Buscar foto automática</button>
         <button class="btn btn-sec btn-peq" data-acao="tirarFoto" id="btnTirar">Tirar foto</button>
+        <input type="file" id="arqGaleria" accept="image/*" hidden>
+        <button class="link" data-acao="galeria" style="font-size:.85rem">Escolher da galeria</button>
         <input type="file" id="arqFoto" accept="image/*" capture="environment" hidden>
       </div>
     </div>
@@ -660,7 +675,7 @@ function abrirForm({ codigo = "", id = null } = {}){
       <div><label for="fQtd">Quantidade</label><input class="campo" type="number" id="fQtd" min="1" value="1" inputmode="numeric"></div>
     </div>`}
     <div class="acoes"><button class="btn btn-pri" data-acao="salvarForm" data-id="${esc(id || "")}">${p ? "Salvar alterações" : "Cadastrar produto"}</button></div>
-    <p class="credito">Fotos e dados automáticos: Open Food Facts.</p>`, { tipo:"form", id });
+    <p class="credito">Identificação pela foto: Google Gemini. Fotos e dados: Open Food Facts.</p>`, { tipo:"form", id });
   mostrarFoto();
   if(!p && codigo) preencherPorCodigo(codigo);
   else if(!p) setTimeout(() => { const n = $("#fNome"); if(n) n.focus(); }, 60);
@@ -703,11 +718,103 @@ async function preencherFotoPorNome(nome, marca){
   mostrarFoto();
   aplicarDadosOpcao(res[0]);
   msgBusca(res.length > 1 ? "Foto colocada. Se não for a certa, toque em outra abaixo." : "Foto colocada.", "ok-msg");
-  const op = $("#opcoes");
-  if(op){
-    op._res = res;
-    op.innerHTML = res.length > 1 ? res.map((o, i) => `<button data-acao="escolherOpcao" data-i="${i}" aria-pressed="${!fotoManual && i === 0}" aria-label="Usar esta foto"><img src="${esc(o.mini)}" alt="" loading="lazy"></button>`).join("") : "";
+  renderOpcoes(res);
+}
+function renderOpcoes(res){
+  const op = $("#opcoes"); if(!op) return;
+  const lista = fotoPropria ? [{ foto: fotoPropria, mini: fotoPropria, propria: true }, ...res] : res;
+  op._res = lista;
+  op.innerHTML = lista.length > 1 ? lista.map((o, i) => `<button data-acao="escolherOpcao" data-i="${i}" aria-pressed="${o.foto === fotoTemp}" aria-label="${o.propria ? "Usar a minha foto" : "Usar esta foto"}"><img src="${esc(urlSegura(o.mini))}" alt="" loading="lazy">${o.propria ? `<span class="tag-sua">sua</span>` : ""}</button>`).join("") : "";
+}
+/* ===== identificar o produto pela foto ===== */
+async function lerCodigoNaFoto(arq){
+  if(!window.Html5Qrcode) return "";
+  let div = document.getElementById("leitorArquivo");
+  if(!div){ div = document.createElement("div"); div.id = "leitorArquivo"; div.style.display = "none"; document.body.appendChild(div); }
+  const h = new Html5Qrcode("leitorArquivo", { verbose:false });
+  try{ const r = String(await h.scanFile(arq, false)).trim(); return /^\d{6,14}$/.test(r) ? r : ""; }
+  catch(e){ return ""; }
+  finally{ try{ h.clear(); }catch(e){} }
+}
+async function identificarNaIA(dataUrl){
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 40000);
+  try{
+    const r = await fetch("/api/identificar", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ imagem: dataUrl }), signal: ctrl.signal });
+    const j = await r.json().catch(() => null);
+    if(!r.ok || !j) return { erro: (j && j.erro) || (r.status === 404 ? "sem_servidor" : "falha") };
+    return j;
+  }catch(e){ return { erro: "rede" }; }
+  finally{ clearTimeout(t); }
+}
+const ERROS_IA = {
+  sem_chave: "A identificação pela foto ainda não foi ligada (falta a chave do Gemini na Vercel).",
+  sem_servidor: "A identificação pela foto não está disponível neste endereço.",
+  limite: "O limite grátis de identificações por foto acabou por agora. Tente de novo mais tarde.",
+  rede: "Sem internet para identificar a foto.",
+  falha: "Não consegui identificar o produto pela foto."
+};
+function dataValida(v){ if(!/^\d{4}-\d{2}-\d{2}$/.test(v || "")) return false; const n = dias(v); return n > -60 && n < 2000; }
+async function identificarPorFoto(arq){
+  const minha = buscaForm = Symbol();
+  const novo = !(folhaAtual && folhaAtual.id);
+  let fotoPeq, fotoIA;
+  try{ [fotoPeq, fotoIA] = await Promise.all([reduzirImagem(arq, 400), reduzirImagem(arq, 1000, .82)]); }
+  catch(e){ toast("Não foi possível ler essa foto."); return; }
+  fotoPropria = fotoPeq; fotoTemp = fotoPeq; fotoManual = true; mostrarFoto(); renderOpcoes([]);
+  msgBusca(`<span class="girando-peq"></span> Identificando o produto pela foto…`, "ok-msg");
+  const btns = document.querySelectorAll('[data-acao="tirarFoto"],[data-acao="salvarForm"]'); btns.forEach(b => b.disabled = true);
+  const liberar = () => btns.forEach(b => b.disabled = false);
+
+  const [codFoto, ia] = await Promise.all([lerCodigoNaFoto(arq), identificarNaIA(fotoIA)]);
+  if(buscaForm !== minha){ liberar(); return; }
+  const preenchidos = [];
+  const marcar = (sel, v, nome) => { const el = $(sel); if(el && !el.readOnly && !el.value.trim() && v){ el.value = v; preenchidos.push(nome); el.classList.add("auto"); } };
+
+  const okIA = ia && !ia.erro && ia.encontrado !== false;
+  let codigo = codFoto || (okIA && /^\d{8,14}$/.test(ia.codigo_barras || "") ? ia.codigo_barras : "");
+  if(okIA){
+    marcar("#fNome", ia.nome, "nome");
+    marcar("#fMarca", ia.marca, "marca");
+    const tam = ia.tamanho && lerTamanho(`${ia.tamanho.numero} ${ia.tamanho.unidade}`);
+    if(tam && !$("#fTamNum").value.trim()){ $("#fTamNum").value = tam.num; $("#fTamUn").value = tam.un; $("#fTamNum").classList.add("auto"); preenchidos.push("tamanho"); }
+    if(novo && dataValida(ia.validade)) marcar("#fVal", ia.validade, "validade");
   }
+  if(novo && codigo) marcar("#fCod", codigo, "código");
+  codigo = codigo || ($("#fCod") ? $("#fCod").value.trim() : "");
+
+  // já existe um produto com esse código?
+  if(novo && codigo && produtos.has(idDeCodigo(codigo))){
+    liberar();
+    msgBusca(`Esse produto já está cadastrado. <button class="link" data-acao="abrirExistente" data-id="${esc(idDeCodigo(codigo))}">Abrir e colocar a validade</button>`, "aviso");
+    return;
+  }
+
+  msgBusca(`<span class="girando-peq"></span> Procurando uma foto melhor na internet…`, "ok-msg");
+  let cand = [];
+  const base = codigo ? await buscarPorCodigo(codigo) : null;
+  if(base){
+    marcar("#fNome", base.nome, "nome"); marcar("#fMarca", base.marca, "marca");
+    if(base.tam && !$("#fTamNum").value.trim()){ $("#fTamNum").value = base.tam.num; $("#fTamUn").value = base.tam.un; preenchidos.push("tamanho"); }
+    if(base.foto) cand.push(base);
+  }
+  const nome = $("#fNome").value.trim(), marca = $("#fMarca").value.trim();
+  if(!cand.length && nome.length >= 3){
+    cand = await buscarPorNome([nome, marca].filter(Boolean).join(" "));
+    if(!cand.length && marca) cand = await buscarPorNome(nome);
+  }
+  if(buscaForm !== minha){ liberar(); return; }
+  if(cand.length){ fotoTemp = cand[0].foto; fotoManual = false; }
+  mostrarFoto(); renderOpcoes(cand);
+  liberar();
+
+  const unicos = [...new Set(preenchidos)];
+  let txt = unicos.length ? `Pronto! Preenchi sozinho: <b>${unicos.join(", ")}</b>.` : "";
+  txt += cand.length ? ` Coloquei uma foto da internet; se preferir a sua, toque nela abaixo.` : " Não achei foto melhor na internet, mantive a sua.";
+  if(unicos.includes("validade")) txt += " <b>Confira a validade</b> lida na embalagem.";
+  if(ia && ia.erro) txt = `${ERROS_IA[ia.erro] || ERROS_IA.falha} ` + (cand.length ? "Mas achei uma foto pela base de produtos." : "Preencha o nome que eu busco a foto.");
+  else if(!okIA && !base) txt = "Não reconheci o produto nessa foto. Tente uma foto mais de frente, mostrando o nome, ou digite o nome.";
+  msgBusca(txt.trim(), (ia && ia.erro) || (!okIA && !base) ? "aviso" : "ok-msg");
+  const v = $("#fVal"); if(v && !v.value) v.focus();
 }
 function aplicarDadosOpcao(o){
   preencherSeVazio("#fMarca", o.marca);
@@ -870,10 +977,13 @@ document.addEventListener("click", async e => {
     case "verVencendo": filtro = "vermelho"; render(); window.scrollTo({ top:0 }); break;
     case "usarCodigo": { const v = $("#codManual").value; await pararScanner(); tratarCodigo(v); break; }
     case "tirarFoto": $("#arqFoto").click(); break;
+    case "galeria": $("#arqGaleria").click(); break;
+    case "fotoSemCodigo": { pararScanner(); abrirForm({}); $("#arqFoto").click(); break; }
+    case "abrirExistente": abrirProduto(id, true); break;
     case "buscarFoto": fotoManual = false; preencherFotoPorNome($("#fNome").value, $("#fMarca").value.trim()); break;
     case "escolherOpcao": {
       const op = $("#opcoes"); const o = op && op._res && op._res[+b.dataset.i]; if(!o) break;
-      fotoTemp = o.foto; fotoManual = false; mostrarFoto(); aplicarDadosOpcao(o);
+      fotoTemp = o.foto; fotoManual = !!o.propria; mostrarFoto(); if(!o.propria) aplicarDadosOpcao(o);
       op.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
       break;
     }
@@ -894,11 +1004,9 @@ document.addEventListener("click", async e => {
   }
 });
 document.addEventListener("change", async e => {
-  if(e.target.id === "arqFoto" && e.target.files[0]){
-    try{
-      fotoTemp = await reduzirImagem(e.target.files[0]); fotoManual = true; buscaForm = null; mostrarFoto();
-      const op = $("#opcoes"); if(op) op.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", "false"));
-    }catch(err){ toast("Não foi possível ler essa foto."); }
+  if((e.target.id === "arqFoto" || e.target.id === "arqGaleria") && e.target.files[0]){
+    const arq = e.target.files[0]; e.target.value = "";
+    identificarPorFoto(arq);
   }
   // ao terminar de digitar o nome de um produto sem foto, busca a foto sozinho
   if(e.target.id === "fNome" && !fotoTemp && e.target.value.trim().length >= 3){
