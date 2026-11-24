@@ -3,7 +3,7 @@
 // GET ?d=NOME    → devolve uma cópia
 // POST           → cria a cópia do dia, se ainda não existir (os celulares chamam sozinhos uma vez por dia)
 // POST {manual}  → cria uma cópia agora, com data e hora no nome
-import { configurado, gh, lerArquivo, gravarArquivo, apagarArquivo, origemOk, lerCorpo } from "./_github.js";
+import { configurado, gh, lerArquivo, gravarArquivo, apagarArquivo, origemOk, lerCorpo, erroGitHub } from "./_github.js";
 
 const PASTA = "backups";
 const NOME = /^\d{4}-\d{2}-\d{2}(-\d{4})?$/;
@@ -80,6 +80,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, nome, produtos: produtos.length });
   } catch (e) {
     console.error(e);
-    return res.status(502).json({ erro: "github" });
+    return res.status(502).json({ erro: erroGitHub(e) });
   }
 }

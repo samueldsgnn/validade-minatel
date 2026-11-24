@@ -1,6 +1,6 @@
 // Guarda e devolve a lista de produtos (produtos.json no repositório de dados).
 // Cada celular manda só o que mudou; aqui as mudanças são juntas pela hora da alteração.
-import { configurado, lerArquivo, gravarArquivo, origemOk, lerCorpo } from "./_github.js";
+import { configurado, lerArquivo, gravarArquivo, origemOk, lerCorpo, erroGitHub } from "./_github.js";
 
 const ARQUIVO = "produtos.json";
 const ESPERA = ms => new Promise(ok => setTimeout(ok, ms));
@@ -65,6 +65,6 @@ export default async function handler(req, res) {
     return res.status(409).json({ erro: "conflito" });
   } catch (e) {
     console.error(e);
-    return res.status(502).json({ erro: "github" });
+    return res.status(502).json({ erro: erroGitHub(e) });
   }
 }

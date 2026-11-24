@@ -1,5 +1,5 @@
 // Guarda as fotos tiradas pelo celular no repositório de dados e as devolve para os outros celulares.
-import { configurado, gh, gravarArquivo, origemOk, lerCorpo } from "./_github.js";
+import { configurado, gh, gravarArquivo, origemOk, lerCorpo, erroGitHub } from "./_github.js";
 
 export default async function handler(req, res) {
   if (!configurado()) return res.status(503).json({ erro: "sem_token" });
@@ -32,6 +32,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ url: `/api/foto?f=${nome}` });
   } catch (e) {
     console.error(e);
-    return res.status(502).json({ erro: "github" });
+    return res.status(502).json({ erro: erroGitHub(e) });
   }
 }

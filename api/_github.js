@@ -71,3 +71,13 @@ export function lerCorpo(req) {
   if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = {}; } }
   return c || {};
 }
+
+// Traduz o erro do GitHub em um motivo que o app mostra para a pessoa.
+export function erroGitHub(e) {
+  const st = Number((/GitHub respondeu (\d+)/.exec(String(e && e.message)) || [])[1]);
+  if (st === 401) return "token_invalido";
+  if (st === 403) return /rate limit/i.test(e.message) ? "limite" : "sem_permissao";
+  if (st === 404) return "repo_nao_achado";
+  if (st === 429) return "limite";
+  return "github";
+}

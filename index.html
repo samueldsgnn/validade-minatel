@@ -255,8 +255,8 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 [data-sync="parado"] .sync-luz{background:var(--cinza)}
 @keyframes pisca{50%{opacity:.35}}
 @media (prefers-reduced-motion: reduce){[data-sync="indo"] .sync-luz{animation:none}}
-.sync-cartao{display:flex;align-items:center;gap:12px;background:var(--superficie-2);border-radius:14px;padding:12px 14px}
-.sync-cartao .sync-luz{width:14px;height:14px}
+.sync-cartao{display:flex;align-items:flex-start;gap:12px;background:var(--superficie-2);border-radius:14px;padding:12px 14px}
+.sync-cartao .sync-luz{width:14px;height:14px;margin-top:4px}
 .sync-cartao[data-sync="ok"]{background:var(--verde-suave)}
 .sync-cartao[data-sync="ok"] .sync-luz{background:var(--verde)}
 .sync-cartao[data-sync="erro"]{background:var(--vermelho-suave)}
@@ -284,6 +284,25 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 .escolha b{display:block;font-weight:900;font-size:1rem;color:var(--azul-cl)}
 .escolha span{display:block;font-size:.86rem;color:var(--tinta-2);margin-top:2px}
 .escolha-perigo b{color:var(--vermelho)}
+.passar{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.como{margin:10px 0 0;padding-left:20px;font-size:.86rem;color:var(--tinta-2)}
+.como li{margin:4px 0}
+.comparacao{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.comparacao li{background:var(--superficie-2);border-radius:12px;padding:10px 14px;font-size:.92rem}
+.comparacao b{font-weight:900;font-size:1.05rem;margin-right:4px}
+.aviso-bk{display:flex;align-items:center;gap:10px;background:var(--azul);color:#fff;border-radius:16px;padding:10px 6px 10px 14px;margin:2px 0 14px;box-shadow:var(--sombra)}
+.aviso-bk svg{flex:none}
+.aviso-bk div{flex:1;min-width:0}
+.aviso-bk b{display:block;font-weight:900}
+.aviso-bk span{display:block;font-size:.82rem;opacity:.85}
+.aviso-salvar{background:#fff;color:var(--azul);flex:none}
+.aviso-x{width:36px;height:36px;border:0;background:transparent;color:#fff;font-size:1.6rem;line-height:1;border-radius:10px;flex:none;opacity:.85}
+.bk-salvando{padding:24px 4px;text-align:center;color:var(--tinta-2)}
+.bk-feito{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;background:var(--verde-suave);border-radius:16px;padding:18px 14px}
+.bk-check{width:52px;height:52px;border-radius:50%;background:var(--verde);color:#fff;display:grid;place-items:center;font-size:1.7rem;font-weight:900;margin-bottom:6px}
+.bk-feito b{font-weight:900;font-size:1.1rem}
+.bk-feito span:not(.bk-check){color:var(--tinta-2);font-size:.9rem}
+.bk-feito code{font-size:.78rem;color:var(--tinta-2);word-break:break-all;margin-top:4px}
 </style>
 </head>
 <body>
@@ -324,6 +343,7 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 </div>
 
 <main class="conteudo">
+  <div id="avisoBackup"></div>
   <h2 class="titulo-lista"><b id="tituloLista">Todos os produtos</b><span id="qtdLista"></span></h2>
   <div id="lista"><p class="carregando">Carregando produtos…</p></div>
   <p class="estado" id="estado">Conectando…</p>
@@ -350,7 +370,7 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 <div class="vela" id="vela" role="dialog" aria-modal="true"><div class="folha" id="folha"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <datalist id="listaMarcas"></datalist>
-<input type="file" id="arqBackup" accept=".json,.txt,application/json,text/plain" hidden>
+<input type="file" id="arqBackup" hidden>
 
 <script>
 (function(){
@@ -430,6 +450,8 @@ async function carregar(){
   carregado = true;
   render();
   await carregarSync();
+  verRecebidoPeloCompartilhar();
+  iniciarLembrete();
   sincronizar();
 }
 let tGravar;
@@ -437,6 +459,7 @@ function gravar(){
   clearTimeout(tGravar);
   tGravar = setTimeout(async () => {
     const lista = [...produtos.values()];
+    anotarMudanca();
     try{ await IDB.set("produtos", lista); }
     catch(e){
       try{ localStorage.setItem(LS_P, JSON.stringify(lista)); }catch(e2){ toast("Não foi possível salvar neste aparelho."); }
@@ -449,7 +472,7 @@ function excluirProduto(id){ produtos.delete(id); Sync.apagados.set(id, Date.now
 /* ===== sincronização ao vivo entre aparelhos (dados guardados no GitHub) =====
    Cada alteração sobe na hora. Enquanto o app está aberto, ele pergunta ao servidor a cada poucos segundos
    se algo mudou; quando nada mudou a resposta é minúscula e não gasta o limite do GitHub. */
-const Sync = { estado: "inicio", pendentes: new Set(), apagados: new Map(), iniciado: false, ultima: 0, rodando: false, denovo: false, timer: null,
+const Sync = { motivo: "", estado: "inicio", pendentes: new Set(), apagados: new Map(), iniciado: false, ultima: 0, rodando: false, denovo: false, timer: null,
   etag: "", falhas: 0, atividade: Date.now(), remota: 0 };
 async function carregarSync(){
   try{
@@ -496,7 +519,7 @@ async function sincronizar(){
   Sync.rodando = true; Sync.denovo = false;
   try{
     const g = await chamarApi("/api/dados" + (Sync.iniciado && Sync.etag ? `?etag=${encodeURIComponent(Sync.etag)}` : ""), {}, 15000);
-    if(!g.ok){ Sync.falhas++; setEstadoSync(g.status === 503 || g.status === 404 || g.status === 405 ? "desligado" : "offline"); return; }
+    if(!g.ok){ falhou(g); return; }
     if(!g.j.igual){
       Sync.etag = g.j.etag || "";
       if(!Sync.iniciado){ produtos.forEach((p, id) => Sync.pendentes.add(id)); Sync.iniciado = true; gravarSync(); }
@@ -508,7 +531,7 @@ async function sincronizar(){
       if(p && typeof p.foto === "string" && p.foto.startsWith("data:")){
         setEstadoSync("enviando");
         const f = await postJSON("/api/foto", { id, imagem: p.foto });
-        if(!f.ok || !f.j.url){ Sync.falhas++; setEstadoSync("offline"); return; }
+        if(!f.ok || !f.j.url){ falhou(f); return; }
         const atual = produtos.get(id); if(atual && atual.foto === p.foto){ atual.foto = f.j.url; gravar(); }
       }
     }
@@ -521,7 +544,7 @@ async function sincronizar(){
       setEstadoSync("enviando");
       const enviados = lote.map(p => [p.id, p.atualizado]);
       const r = await postJSON("/api/dados", { mudancas: lote });
-      if(!r.ok){ Sync.falhas++; setEstadoSync("offline"); return; }
+      if(!r.ok){ falhou(r); return; }
       for(const [id, at] of enviados){
         const p = produtos.get(id), agora = p ? p.atualizado : Sync.apagados.get(id);
         if(agora === at){ Sync.pendentes.delete(id); if(!p) Sync.apagados.delete(id); }
@@ -529,7 +552,7 @@ async function sincronizar(){
       gravarSync();
       mesclar(r.j.produtos);
     }
-    Sync.falhas = 0;
+    Sync.falhas = 0; Sync.motivo = "";
     Sync.ultima = Date.now();
     setEstadoSync("ok");
     backupDoDia();
@@ -540,7 +563,7 @@ async function sincronizar(){
 }
 // de quanto em quanto tempo pergunta ao servidor se algo mudou
 function proximaConsulta(){
-  if(Sync.estado === "desligado") return 300000;
+  if(Sync.estado === "desligado") return 60000;
   if(Sync.falhas) return Math.min(60000, 4000 * 2 ** Math.min(Sync.falhas - 1, 4)); // sem internet: tenta de novo cada vez mais devagar
   if(document.visibilityState !== "visible") return 90000;
   if(Sync.pendentes.size) return 1500;
@@ -548,14 +571,41 @@ function proximaConsulta(){
   return parado > 180000 ? 12000 : 4000;
 }
 function setEstadoSync(e){ Sync.estado = e; atualizarEstado(); }
+// descobre o motivo exato de não conseguir falar com a nuvem
+function motivoDe(res){
+  const e = res.j && res.j.erro;
+  if(res.status === 0) return navigator.onLine === false ? "sem_internet" : "sem_resposta";
+  if(e === "sem_token") return "sem_token";
+  if(e === "token_invalido" || e === "sem_permissao" || e === "repo_nao_achado" || e === "limite") return e;
+  if(e === "origem") return "origem";
+  if(res.status === 404 || res.status === 405 || (!res.j && res.status === 200)) return "sem_api";
+  return "github";
+}
+const MOTIVOS = {
+  sem_internet: "Sem internet neste aparelho.",
+  sem_resposta: "O servidor não respondeu. Confira a internet ou o endereço do app.",
+  sem_token: "Falta a chave GITHUB_TOKEN na Vercel (ou falta fazer um novo deploy depois de colocar a chave).",
+  sem_api: "O servidor não tem a pasta api: os arquivos dados.js, foto.js, backup.js e _github.js precisam ficar dentro da pasta api do projeto.",
+  token_invalido: "A chave GITHUB_TOKEN está errada ou venceu. Gere outra no GitHub e troque na Vercel.",
+  sem_permissao: "A chave GITHUB_TOKEN não tem permissão de escrever no repositório de dados.",
+  repo_nao_achado: "O repositório de dados não foi encontrado. Confira o nome em GITHUB_REPO na Vercel.",
+  limite: "O GitHub pediu para esperar um pouco. Tentando de novo…",
+  origem: "Este endereço não tem permissão de usar o servidor. Abra o app pelo endereço da Vercel.",
+  github: "O servidor não conseguiu falar com o GitHub. Tentando de novo…"
+};
+const MOTIVOS_DESLIGADO = new Set(["sem_token", "sem_api", "token_invalido", "sem_permissao", "repo_nao_achado", "origem"]);
+function falhou(res){
+  Sync.falhas++; Sync.motivo = motivoDe(res);
+  setEstadoSync(MOTIVOS_DESLIGADO.has(Sync.motivo) ? "desligado" : "offline");
+}
 function horaBR(t){ return new Date(t).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
 function textoSync(){
   const n = Sync.pendentes.size;
   switch(Sync.estado){
     case "ok": return n ? `Enviando ${n} alteração(ões)…` : `Todos os aparelhos em dia · conferido às ${horaBR(Sync.ultima)}`;
     case "enviando": return `Enviando ${n} alteração(ões)…`;
-    case "offline": return n ? `Sem internet. ${n} alteração(ões) guardada(s) aqui, sobem quando voltar o sinal.` : "Sem internet. Tentando de novo…";
-    case "desligado": return "Sincronização não ligada no servidor: os dados ficam só neste aparelho.";
+    case "offline": return `${MOTIVOS[Sync.motivo] || "Sem conexão."}${n ? ` ${n} alteração(ões) guardada(s) aqui, sobem quando voltar.` : ""}`;
+    case "desligado": return `${MOTIVOS[Sync.motivo] || "Nuvem não ligada."} Enquanto isso, os dados ficam só neste aparelho.`;
     default: return "Conectando…";
   }
 }
@@ -613,7 +663,7 @@ const fotoDaEquipe = u => typeof u === "string" && /^\/api\/foto\?f=/.test(u);
 const copiaValida = u => typeof u === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(u) && u.length <= 1500000;
 async function montarBackup(comFotos, aoProgresso){
   const lista = [...produtos.values()].map(p => ({ ...p, lotes: (p.lotes || []).map(l => ({ ...l })) }));
-  let nFotos = 0;
+  let nFotos = lista.filter(p => typeof p.foto === "string" && p.foto.startsWith("data:")).length;
   if(comFotos){
     const alvo = lista.filter(p => fotoDaEquipe(p.foto));
     for(let i = 0; i < alvo.length; i++){
@@ -625,18 +675,46 @@ async function montarBackup(comFotos, aoProgresso){
     }
   }
   const agora = new Date();
-  const dados = { app: "validade-minatel", tipo: "backup", versao: 2, criado: agora.toISOString(), config: cfg, fotos: comFotos ? "incluidas" : "links", produtos: lista };
-  const nome = `validade-minatel-backup-${diaLocal()}-${String(agora.getHours()).padStart(2, "0")}${String(agora.getMinutes()).padStart(2, "0")}.json`;
-  return { texto: JSON.stringify(dados), nome, n: lista.length, nFotos };
+  const dados = { app: "validade-minatel", tipo: "backup", versao: 3, criado: agora.toISOString(), config: cfg, fotos: comFotos ? "incluidas" : "links",
+    produtos: lista, apagados: Object.fromEntries(Sync.apagados) };
+  const d2 = n => String(n).padStart(2, "0");
+  const nome = `Validade Minatel ${d2(agora.getDate())}-${d2(agora.getMonth() + 1)}-${agora.getFullYear()} ${d2(agora.getHours())}h${d2(agora.getMinutes())}.validade`;
+  return { conteudo: await codificar(JSON.stringify(dados)), nome, n: lista.length, nFotos };
 }
-function baixarTexto(texto, nome){
-  const url = URL.createObjectURL(new Blob([texto], { type: "application/json" }));
+/* Arquivo .validade: só o app abre. É a lista compactada e embaralhada em texto,
+   com uma assinatura no começo para o app reconhecer. */
+const ASSINATURA = "VALIDADE-MINATEL";
+function paraBase64(b){ let s = ""; for(let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
+function deBase64(t){ const s = atob(t); const b = new Uint8Array(s.length); for(let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; }
+async function codificar(json){
+  const bytes = new TextEncoder().encode(json);
+  if(window.CompressionStream){
+    try{
+      const gz = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+      return `${ASSINATURA} 1 gz\n${paraBase64(gz)}\n`;
+    }catch(e){}
+  }
+  return `${ASSINATURA} 1 b64\n${paraBase64(bytes)}\n`;
+}
+async function decodificar(texto){
+  texto = String(texto || "").replace(/^\uFEFF/, "");
+  if(/^\s*[\[{]/.test(texto)) return texto; // backup antigo em JSON (versão 5)
+  const m = /^\s*VALIDADE-MINATEL\s+(\d+)\s+(gz|b64)\s*\n([\s\S]*)$/.exec(texto);
+  if(!m) throw new Error("formato");
+  const bytes = deBase64(m[3].replace(/\s+/g, ""));
+  if(m[2] === "b64") return new TextDecoder().decode(bytes);
+  if(!window.DecompressionStream) throw new Error("navegador");
+  return await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+}
+function baixarArquivo(conteudo, nome){
+  const url = URL.createObjectURL(new Blob([conteudo], { type: "application/octet-stream" }));
   const a = document.createElement("a"); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
-function arquivoParaEnviar(texto, nome){
+// o Android só deixa compartilhar alguns tipos de arquivo; se não aceitar .validade, vai como .validade.txt (o conteúdo é o mesmo)
+function arquivoParaEnviar(conteudo, nome){
   if(!navigator.canShare) return null;
-  const tentativas = [new File([texto], nome, { type: "application/json" }), new File([texto], nome.replace(/\.json$/, ".txt"), { type: "text/plain" })];
+  const tentativas = [new File([conteudo], nome, { type: "application/octet-stream" }), new File([conteudo], nome + ".txt", { type: "text/plain" })];
   for(const f of tentativas){ try{ if(navigator.canShare({ files: [f] })) return f; }catch(e){} }
   return null;
 }
@@ -652,13 +730,107 @@ function lerBackup(texto){
     if(!o.foto && copias.has(o.id)) o.foto = copias.get(o.id);
     lista.push(o);
   }
-  return { lista, copias, criado: (j && j.criado) || "", config: j && j.config };
+  const apagados = new Map();
+  if(j && j.apagados && typeof j.apagados === "object") for(const [id, t] of Object.entries(j.apagados)){
+    if(/^[A-Za-z0-9_-]{1,130}$/.test(id) && Number(t) > 0 && !lista.some(p => p.id === id)) apagados.set(id, Number(t));
+  }
+  return { lista, copias, apagados, criado: (j && j.criado) || "", config: j && j.config };
 }
 function quandoBackup(iso, nome){
   const d = iso ? new Date(iso) : null;
   if(d && !isNaN(d)) return `${d.toLocaleDateString("pt-BR")} às ${horaBR(d)}`;
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2}))?$/.exec(nome || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}${m[4] ? ` às ${m[4]}:${m[5]}` : ""}` : "data desconhecida";
+}
+// compara o arquivo com este celular, produto por produto, pela hora da última alteração
+function compararArquivo(bk){
+  const r = { novos: 0, maisNovos: 0, iguais: 0, apagar: 0 };
+  for(const b of bk.lista){
+    const atual = produtos.get(b.id), excl = Sync.apagados.get(b.id);
+    if(atual){ if((b.atualizado || 0) > (atual.atualizado || 0)) r.maisNovos++; else r.iguais++; }
+    else if(excl && excl >= (b.atualizado || 0)) r.iguais++;
+    else r.novos++;
+  }
+  for(const [id, t] of bk.apagados){ const atual = produtos.get(id); if(atual && (atual.atualizado || 0) < t) r.apagar++; }
+  return r;
+}
+function abrirRecebido(bk){
+  if(!bk || (!bk.lista.length && !bk.apagados.size)){ toast("Esse arquivo não tem produtos."); return; }
+  restaurando = bk;
+  const c = compararArquivo(bk);
+  const nLotes = bk.lista.reduce((s, p) => s + p.lotes.filter(l => l.qtd > 0).length, 0);
+  const linha = (n, txt) => n ? `<li><b>${n}</b> ${txt}</li>` : "";
+  const nada = !c.novos && !c.maisNovos && !c.apagar;
+  abrirFolha(`${topoFolha("Receber de outro celular")}
+    <div class="bk-resumo">
+      <b>Arquivo de ${esc(quandoBackup(bk.criado, ""))}</b>
+      <span>${bk.lista.length} produto(s) · ${nLotes} validade(s) com estoque</span>
+    </div>
+    ${nada ? `<p class="ok-msg">Este celular já está igual ou mais atualizado que o arquivo. Não há nada para trazer.</p>` : `
+    <ul class="comparacao">
+      ${linha(c.novos, "produto(s) novo(s) para este celular")}
+      ${linha(c.maisNovos, "produto(s) mais atualizado(s) no arquivo")}
+      ${linha(c.apagar, "produto(s) que foram excluídos no outro celular")}
+      ${linha(c.iguais, "já estão iguais ou mais novos aqui (ficam como estão)")}
+    </ul>
+    <button class="btn btn-pri btn-bloco" style="margin-top:14px" data-acao="receberAtualizar">Atualizar este celular</button>
+    <p class="dica">Fica sempre a versão mais nova de cada produto, juntando o trabalho dos dois celulares.</p>`}
+    <button class="escolha escolha-perigo" data-acao="restaurarSubstituir">
+      <b>Deixar este celular igual ao arquivo</b>
+      <span>Apaga daqui o que não estiver no arquivo. Use só para voltar um backup antigo.</span>
+    </button>
+    <button class="btn btn-sec btn-bloco" style="margin-top:14px" data-acao="backup">Voltar</button>`, { tipo: "restaurar" });
+}
+function aplicarRecebido(){
+  const bk = restaurando; if(!bk) return;
+  let novos = 0, trocados = 0, apagados = 0;
+  for(const b of bk.lista){
+    const atual = produtos.get(b.id), excl = Sync.apagados.get(b.id);
+    if(atual ? (b.atualizado || 0) <= (atual.atualizado || 0) : (excl && excl >= (b.atualizado || 0))) continue;
+    const p = { ...b, lotes: b.lotes.map(l => ({ ...l })) };
+    if(atual && !p.foto && atual.foto) p.foto = atual.foto;
+    if(!p.atualizado) p.atualizado = Date.now();
+    produtos.set(p.id, p); Sync.apagados.delete(p.id); Sync.pendentes.add(p.id);
+    if(atual) trocados++; else novos++;
+  }
+  for(const [id, t] of bk.apagados){
+    const atual = produtos.get(id);
+    if(atual && (atual.atualizado || 0) >= t) continue;
+    if(atual){ produtos.delete(id); apagados++; }
+    if(atual || !Sync.apagados.has(id)){ Sync.apagados.set(id, t); Sync.pendentes.add(id); }
+  }
+  if(marcaSel && marcaSel !== "_sem" && !marcasAtuais().some(m => m.chave === marcaSel)) marcaSel = null;
+  gravar(); gravarSync(); render(); fecharFolha();
+  const partes = [];
+  if(novos) partes.push(`${novos} novo(s)`);
+  if(trocados) partes.push(`${trocados} atualizado(s)`);
+  if(apagados) partes.push(`${apagados} excluído(s)`);
+  toast(partes.length ? `Celular atualizado: ${partes.join(", ")}.` : "Nada mudou: este celular já estava em dia.");
+  restaurando = null;
+  if(Sync.estado !== "desligado") agendarSync(0);
+  conferirFotos(bk);
+}
+async function abrirArquivoEscolhido(arq){
+  if(arq.size > 80e6){ toast("Arquivo grande demais para ser do app."); return; }
+  let bk = null;
+  try{ bk = lerBackup(await decodificar(await arq.text())); }
+  catch(e){ toast(e && e.message === "navegador" ? "Atualize o navegador deste celular para abrir esse arquivo." : "Esse arquivo não é do app de validade."); return; }
+  if(!bk){ toast("Esse arquivo não é do app de validade."); return; }
+  abrirRecebido(bk);
+}
+// arquivo que chegou pelo menu Compartilhar do Android (o app instalado aparece na lista)
+async function verRecebidoPeloCompartilhar(){
+  if(!/[?&]receber=1/.test(location.search)) return;
+  history.replaceState(null, "", location.pathname);
+  try{
+    const c = await caches.open("validade-recebido");
+    const chave = new URL("__recebido", location.href).href;
+    const r = await c.match(chave);
+    if(!r){ toast("O arquivo não chegou. Tente pelo botão Receber de outro celular."); return; }
+    const nome = decodeURIComponent(r.headers.get("x-nome") || "arquivo.validade");
+    const blob = await r.blob(); await c.delete(chave);
+    await abrirArquivoEscolhido(new File([blob], nome));
+  }catch(e){ toast("Não deu para abrir o arquivo recebido."); }
 }
 function abrirRestaurar(bk, origem){
   if(!bk || !bk.lista.length){ toast("Esse arquivo não tem produtos para restaurar."); return; }
@@ -730,13 +902,13 @@ async function salvarCopiaNuvem(btn){
   if(btn){ btn.disabled = false; btn.textContent = "Salvar cópia agora"; }
   if(r.ok && r.j.ok){ toast(`Cópia salva na nuvem (${r.j.produtos} produtos).`); carregarCopias(); }
   else if(r.ok && r.j.erro === "vazio") toast("A lista na nuvem está vazia: nada para guardar.");
-  else toast(r.status === 503 ? "A nuvem não está ligada neste app." : "Não deu para salvar agora. Confira a internet.");
+  else toast(MOTIVOS[motivoDe(r)] || "Não deu para salvar agora.");
 }
 async function carregarCopias(){
   const box = $("#listaCopias"); if(!box) return;
   const r = await chamarApi("/api/backup", {}, 15000);
   if(!$("#listaCopias")) return;
-  if(!r.ok){ box.innerHTML = `<p class="dica">${r.status === 503 ? "A nuvem não está ligada: use o arquivo de backup abaixo." : "Sem conexão para ver as cópias agora."}</p>`; return; }
+  if(!r.ok){ box.innerHTML = `<p class="dica">${esc(MOTIVOS[motivoDe(r)] || "Sem conexão para ver as cópias agora.")} O arquivo de backup abaixo funciona mesmo assim.</p>`; return; }
   const cs = r.j.copias || [];
   if(!cs.length){ box.innerHTML = `<p class="dica">Nenhuma cópia ainda. A primeira é feita sozinha hoje.</p>`; return; }
   const kb = t => t > 1e6 ? `${(t / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(t / 1e3))} KB`;
@@ -774,15 +946,33 @@ async function mostrarQR(){
 }
 function abrirBackup(){
   const podeEnviarLink = !!navigator.share;
-  const podeEnviarArq = !!arquivoParaEnviar("{}", "teste.json");
-  const equipe = [...produtos.values()].filter(p => fotoDaEquipe(p.foto)).length;
+  const podeEnviarArq = !!arquivoParaEnviar("x", "teste.validade");
   abrirFolha(`${topoFolha("Backup e sincronização")}
     <div class="sync-cartao" data-sync="${corSync()}">
       <span class="sync-luz"></span>
       <div><b id="tituloSyncCfg">${esc(tituloSync())}</b><span id="estadoSyncCfg">${esc(textoSync())}</span></div>
     </div>
-    <p class="dica">Cada alteração vai para a nuvem na hora e aparece nos outros aparelhos em poucos segundos. Sem internet, fica guardada aqui e sobe sozinha quando o sinal voltar.</p>
+    <p class="dica">${Sync.estado === "desligado" ? "Enquanto a nuvem não liga, use <b>Passar para outro celular</b> logo abaixo." : "Cada alteração vai para a nuvem na hora e aparece nos outros aparelhos em poucos segundos. Sem internet, fica guardada aqui e sobe sozinha quando o sinal voltar."}</p>
     <button class="btn btn-sec btn-bloco" style="margin-top:8px" data-acao="sincronizar">Sincronizar agora</button>
+
+    ${blocoLembrete()}
+
+    <div class="secao">
+      <h4>Passar para outro celular</h4>
+      <p class="dica">Funciona mesmo sem a nuvem. O app gera um arquivo que só ele abre, com os produtos, as validades e as fotos.</p>
+      <div class="passar">
+        <button class="btn btn-pri btn-bloco" data-acao="enviarBackup">${podeEnviarArq ? "Enviar para outro celular" : "Salvar arquivo para enviar"}</button>
+        ${podeEnviarArq ? `<button class="btn btn-sec btn-bloco" data-acao="baixarBackup">Salvar arquivo neste celular</button>` : ""}
+        <button class="btn btn-sec btn-bloco" data-acao="restaurarArquivo">Receber de outro celular</button>
+      </div>
+      <p class="dica" id="msgBackup"></p>
+      <ol class="como">
+        <li>${podeEnviarArq ? "Neste celular, toque em <b>Enviar para outro celular</b> e escolha WhatsApp, Bluetooth ou Drive." : "Neste celular, toque em <b>Salvar arquivo para enviar</b> e mande o arquivo da pasta Downloads pelo WhatsApp, Bluetooth ou Drive."}</li>
+        <li>No outro celular, baixe o arquivo, abra este app e toque em <b>Receber de outro celular</b>.</li>
+        <li>Confira o resumo e toque em <b>Atualizar este celular</b>.</li>
+      </ol>
+      <p class="dica">O arquivo também serve de backup: guarde no Drive para voltar a lista quando precisar.</p>
+    </div>
 
     <div class="secao">
       <h4>Usar em outro aparelho</h4>
@@ -802,40 +992,183 @@ function abrirBackup(){
       <p class="dica">O app guarda sozinho uma cópia da lista por dia e mantém as dos últimos ${60} dias.</p>
       <button class="btn btn-pri btn-bloco" style="margin-top:8px" data-acao="salvarNuvem">Salvar cópia agora</button>
       <div id="listaCopias"><p class="dica">${GIRA}Buscando cópias…</p></div>
-    </div>
-
-    <div class="secao">
-      <h4>Arquivo de backup</h4>
-      <p class="dica">Guarde um arquivo no celular, no Drive ou mande no WhatsApp. Com ele dá para voltar a lista em qualquer aparelho.</p>
-      ${equipe ? `<label class="marcar"><input type="checkbox" id="bkFotos"> Incluir as ${equipe} foto(s) tiradas pela equipe <small>(arquivo maior)</small></label>` : ""}
-      <div class="acoes" style="margin-top:10px">
-        <button class="btn btn-sec" data-acao="baixarBackup">Salvar arquivo</button>
-        ${podeEnviarArq ? `<button class="btn btn-sec" data-acao="enviarBackup">Enviar arquivo</button>` : ""}
-      </div>
-      <button class="btn btn-sec btn-bloco" style="margin-top:8px" data-acao="restaurarArquivo">Restaurar de um arquivo</button>
-      <p class="dica" id="msgBackup"></p>
     </div>`, { tipo: "backup" });
   mostrarQR();
   carregarCopias();
 }
 async function gerarArquivo(btn, enviar){
-  const comFotos = !!($("#bkFotos") && $("#bkFotos").checked);
   const rotulo = btn ? btn.textContent : "";
-  if(btn) btn.disabled = true;
+  if(btn){ btn.disabled = true; btn.innerHTML = `${GIRA}Preparando…`; }
   const msg = $("#msgBackup");
-  const bk = await montarBackup(comFotos, (i, n) => { if(msg) msg.innerHTML = `${GIRA}Copiando foto ${i} de ${n}…`; });
+  const bk = await montarBackup(true, (i, n) => { if(msg) msg.innerHTML = `${GIRA}Juntando foto ${i} de ${n}…`; });
   if(msg) msg.textContent = "";
   if(btn){ btn.disabled = false; btn.textContent = rotulo; }
-  const resumoTxt = `${bk.n} produto(s)${comFotos ? `, ${bk.nFotos} foto(s)` : ""}`;
+  const resumoTxt = `${bk.n} produto(s)${bk.nFotos ? ` e ${bk.nFotos} foto(s)` : ""}`;
   if(enviar){
-    const f = arquivoParaEnviar(bk.texto, bk.nome);
+    const f = arquivoParaEnviar(bk.conteudo, bk.nome);
     if(f){
-      try{ await navigator.share({ files: [f], title: "Backup Validade Minatel", text: `Backup do controle de validade (${resumoTxt})` }); toast("Backup enviado."); return; }
+      try{ await navigator.share({ files: [f], title: "Validade Minatel", text: `Lista do controle de validade (${resumoTxt}). Abra no app: Receber de outro celular.` }); backupFeito(); toast("Arquivo enviado."); return; }
       catch(e){ if(e && e.name === "AbortError") return; }
     }
   }
-  baixarTexto(bk.texto, bk.nome);
-  toast(`Arquivo salvo: ${resumoTxt}.`);
+  baixarArquivo(bk.conteudo, bk.nome);
+  backupFeito();
+  toast(`Arquivo salvo em Downloads: ${resumoTxt}.`);
+}
+/* ===== lembrete de backup =====
+   O app avisa quando passa da hora de salvar (faixa no topo e, se permitido, notificação no celular).
+   Um toque gera o arquivo .validade e salva no celular. */
+const LS_AUTO = "validade:autoBackup";
+const ehIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+let auto = { freq: 1, hora: 17, ultimo: 0, adiado: 0, mudanca: 0, n: 0 };
+try{ auto = { ...auto, ...JSON.parse(localStorage.getItem(LS_AUTO) || "{}") }; }catch(e){}
+let avisadoEm = 0, salvandoBk = false, bkPronto = null, fundoOk = false;
+function gravarAuto(){
+  try{ localStorage.setItem(LS_AUTO, JSON.stringify(auto)); }catch(e){}
+  IDB.set("autoBackup", { ...auto }).catch(() => {}); // o service worker lê daqui para avisar com o app fechado
+}
+function anotarMudanca(){
+  let m = 0;
+  for(const p of produtos.values()) if((p.atualizado || 0) > m) m = p.atualizado;
+  for(const t of Sync.apagados.values()) if(t > m) m = t;
+  if(m !== auto.mudanca || produtos.size !== auto.n){ auto.mudanca = m; auto.n = produtos.size; gravarAuto(); }
+}
+function proximoBackup(){
+  const base = auto.ultimo ? new Date(auto.ultimo) : new Date();
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + (auto.ultimo ? auto.freq : 0), auto.hora, 0, 0);
+  return Math.max(d.getTime(), auto.adiado || 0);
+}
+const temMudanca = () => (auto.mudanca || 0) > (auto.ultimo || 0);
+function backupPendente(){ return carregado && auto.freq > 0 && produtos.size > 0 && temMudanca() && Date.now() >= proximoBackup(); }
+function quandoCurto(t){
+  const d = new Date(t), hoje = new Date(), ontem = new Date(Date.now() - 864e5), amanha = new Date(Date.now() + 864e5);
+  const mesmoDia = (a, b) => a.toDateString() === b.toDateString();
+  const dia = mesmoDia(d, hoje) ? "hoje" : mesmoDia(d, ontem) ? "ontem" : mesmoDia(d, amanha) ? "amanhã" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return `${dia} às ${horaBR(d)}`;
+}
+function textoLembrete(){
+  const ult = auto.ultimo ? `Último backup: ${quandoCurto(auto.ultimo)}.` : "Nenhum backup salvo ainda.";
+  if(!auto.freq) return `${ult} Lembrete desligado.`;
+  if(!produtos.size) return `${ult} O aviso começa quando houver produtos.`;
+  if(!temMudanca()) return `${ult} Nada mudou desde então: o próximo aviso vem depois da próxima alteração.`;
+  return backupPendente() ? `${ult} Está na hora de salvar.` : `${ult} Próximo aviso: ${quandoCurto(proximoBackup())}.`;
+}
+const notifOk = () => "Notification" in window && Notification.permission === "granted";
+function verificarLembrete(){
+  if(!carregado) return;
+  anotarMudanca();
+  const pend = backupPendente();
+  const box = $("#avisoBackup");
+  if(box){
+    box.innerHTML = pend ? `<div class="aviso-bk" role="status">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+      <div><b>Hora de salvar o backup</b><span>${auto.ultimo ? `Último: ${esc(quandoCurto(auto.ultimo))}` : "Ainda não tem nenhum salvo"}</span></div>
+      <button class="btn btn-peq aviso-salvar" data-acao="salvarBackupAgora">Salvar</button>
+      <button class="aviso-x" data-acao="adiarBackup" aria-label="Lembrar mais tarde">&times;</button>
+    </div>` : "";
+  }
+  if(pend && document.visibilityState !== "visible" && notifOk() && Date.now() - avisadoEm > 3 * 36e5){ avisadoEm = Date.now(); mostrarNotificacao(); }
+  const info = $("#autoInfo"); if(info) info.textContent = textoLembrete();
+}
+async function mostrarNotificacao(){
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("Hora de salvar o backup", { body: `${produtos.size} produto(s) com alterações. Toque para salvar tudo num arquivo no celular.`,
+      icon: "icon-192.png", tag: "backup-validade", data: { acao: "backup" } });
+  }catch(e){}
+}
+// com o app instalado no Android, o celular acorda o app de tempos em tempos para conferir se precisa avisar
+async function registrarLembrete(){
+  fundoOk = false;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    if(!reg.periodicSync) return;
+    if(!auto.freq){ await reg.periodicSync.unregister("lembrete-backup"); return; }
+    const st = await navigator.permissions.query({ name: "periodic-background-sync" });
+    if(st.state !== "granted") return;
+    await reg.periodicSync.register("lembrete-backup", { minInterval: 4 * 36e5 });
+    fundoOk = true;
+  }catch(e){}
+}
+function backupFeito(){ auto.ultimo = Date.now(); auto.adiado = 0; gravarAuto(); verificarLembrete(); }
+function iniciarLembrete(){
+  gravarAuto(); verificarLembrete();
+  if("serviceWorker" in navigator){
+    registrarLembrete();
+    navigator.serviceWorker.addEventListener("message", e => { if(e.data && e.data.tipo === "salvarBackup") salvarBackupAgora(); });
+  }
+  if(/[?&]backup=1/.test(location.search)){ history.replaceState(null, "", location.pathname); salvarBackupAgora(); }
+}
+setInterval(verificarLembrete, 60000);
+document.addEventListener("visibilitychange", verificarLembrete);
+async function salvarBackupAgora(){
+  if(!carregado || salvandoBk) return;
+  salvandoBk = true; bkPronto = null;
+  abrirFolha(`${topoFolha("Salvar backup")}<div class="bk-salvando" id="bkSalvando">${GIRA}Preparando o arquivo…</div>`, { tipo: "salvarBackup" });
+  try{
+    const bk = await montarBackup(true, (i, n) => { const el = $("#bkSalvando"); if(el) el.innerHTML = `${GIRA}Juntando foto ${i} de ${n}…`; });
+    bkPronto = bk;
+    if(ehIOS) mostrarBackupPronto(bk, false);   // no iPhone precisa de mais um toque para escolher onde salvar
+    else { baixarArquivo(bk.conteudo, bk.nome); backupFeito(); mostrarBackupPronto(bk, true); }
+  }catch(e){
+    if(folhaAtual && folhaAtual.tipo === "salvarBackup") $("#bkSalvando").textContent = "Não deu para montar o arquivo. Tente de novo.";
+  }finally{ salvandoBk = false; }
+}
+function mostrarBackupPronto(bk, salvo){
+  if(!folhaAtual || folhaAtual.tipo !== "salvarBackup") return;
+  const resumo = `${bk.n} produto(s)${bk.nFotos ? ` e ${bk.nFotos} foto(s)` : ""}`;
+  abrirFolha(`${topoFolha(salvo ? "Backup salvo" : "Backup pronto")}
+    <div class="bk-feito">
+      <span class="bk-check" aria-hidden="true">${salvo ? "✓" : "↓"}</span>
+      <b>${salvo ? "Tudo salvo no celular" : "Falta só escolher onde guardar"}</b>
+      <span>${resumo}</span>
+      <code>${esc(bk.nome)}</code>
+    </div>
+    ${salvo ? `<p class="dica">O arquivo está na pasta <b>Downloads</b>. Para voltar a lista, toque na nuvem do app → <b>Receber de outro celular</b> e escolha esse arquivo.</p>
+      <button class="btn btn-pri btn-bloco" style="margin-top:14px" data-acao="fechar">Pronto</button>
+      <button class="btn btn-sec btn-bloco" style="margin-top:8px" data-acao="baixarDeNovo">Não apareceu? Salvar de novo</button>`
+    : `<button class="btn btn-pri btn-bloco" style="margin-top:14px" data-acao="salvarArquivoPronto">Salvar no iPhone</button>
+      <p class="dica">Escolha <b>Salvar em Arquivos</b>. Para voltar a lista, toque na nuvem do app → <b>Receber de outro celular</b>.</p>`}`, { tipo: "salvarBackup" });
+}
+async function salvarArquivoPronto(){
+  const bk = bkPronto; if(!bk) return;
+  const f = arquivoParaEnviar(bk.conteudo, bk.nome);
+  if(f){
+    try{ await navigator.share({ files: [f], title: bk.nome }); backupFeito(); mostrarBackupPronto(bk, true); toast("Backup salvo."); return; }
+    catch(e){ if(e && e.name === "AbortError") return; }
+  }
+  baixarArquivo(bk.conteudo, bk.nome); backupFeito(); mostrarBackupPronto(bk, true);
+}
+async function ativarNotificacao(){
+  if(!("Notification" in window)) return;
+  let r = Notification.permission;
+  try{ r = await Notification.requestPermission(); }catch(e){}
+  await registrarLembrete();
+  if(r === "granted"){ toast("Pronto: o celular vai avisar na hora do backup."); }
+  else toast("O celular não deixou mostrar notificações. O aviso continua aparecendo dentro do app.");
+  if(folhaAtual && folhaAtual.tipo === "backup") abrirBackup();
+}
+function blocoLembrete(){
+  const freqs = [[1, "Todo dia"], [2, "A cada 2 dias"], [7, "Toda semana"], [0, "Nunca"]];
+  const horas = Array.from({ length: 16 }, (_, i) => i + 6);
+  let notif = "";
+  if(auto.freq){
+    if(!("Notification" in window)) notif = `<p class="dica">${ehIOS ? "No iPhone o aviso aparece dentro do app, assim que ele for aberto." : "Este navegador não mostra notificações: o aviso aparece dentro do app."}</p>`;
+    else if(Notification.permission === "granted") notif = `<p class="ok-msg">Notificação ligada neste celular.${fundoOk ? "" : " Para o aviso chegar com o app fechado, instale o app na tela inicial."}</p>`;
+    else if(Notification.permission === "denied") notif = `<p class="dica">As notificações deste app estão bloqueadas. Para ligar: Configurações do celular → Apps → Chrome (ou Validade) → Notificações.</p>`;
+    else notif = `<button class="btn btn-sec btn-bloco" style="margin-top:10px" data-acao="ativarNotif">Avisar também por notificação</button>`;
+  }
+  return `<div class="secao">
+      <h4>Lembrete de backup</h4>
+      <p class="dica">O app avisa sozinho quando for hora de salvar. Um toque no aviso guarda tudo num arquivo no celular.</p>
+      <div class="linha2" style="grid-template-columns:1fr 1fr">
+        <div><label for="autoFreq">Avisar</label><select class="campo" id="autoFreq">${freqs.map(([v, t]) => `<option value="${v}" ${auto.freq === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+        <div><label for="autoHora">A partir das</label><select class="campo" id="autoHora" ${auto.freq ? "" : "disabled"}>${horas.map(h => `<option value="${h}" ${auto.hora === h ? "selected" : ""}>${h}h</option>`).join("")}</select></div>
+      </div>
+      <p class="dica" id="autoInfo">${esc(textoLembrete())}</p>
+      ${notif}
+      <button class="btn btn-pri btn-bloco" style="margin-top:10px" data-acao="salvarBackupAgora">Salvar backup agora</button>
+    </div>`;
 }
 function salvarConfig(){ try{ localStorage.setItem(LS_C, JSON.stringify(cfg)); }catch(e){} render(); }
 
@@ -977,7 +1310,7 @@ function render(){
   $("#qtdLista").textContent = produtos.size ? `${vis.length} produto(s)` : "";
 
   const lista = $("#lista");
-  if(!produtos.size){ lista.innerHTML = `<div class="vazio"><h3>Nenhum produto ainda</h3><p>Toque em <b>Bipar</b> e aponte a câmera para o código de barras. O app busca nome, marca, tamanho e foto sozinho.</p></div>`; return; }
+  if(!produtos.size){ lista.innerHTML = `<div class="vazio"><h3>Nenhum produto ainda</h3><p>Toque em <b>Bipar</b> e aponte a câmera para o código de barras. O app busca nome, marca, tamanho e foto sozinho.</p><button class="btn btn-sec" style="margin-top:14px" data-acao="restaurarArquivo">Receber lista de outro celular</button></div>`; return; }
   if(!vis.length){ lista.innerHTML = `<div class="vazio"><h3>Nada por aqui</h3><p>${t ? "Nenhum produto com esse nome, marca ou código." : "Nenhum produto nessa situação. Bom sinal."}</p></div>`; return; }
   lista.innerHTML = vis.map(({p,r}) => {
     const numDias = r.prox ? (r.n < 0 ? `${-r.n}<small>atrás</small>` : `${r.n}<small>${r.n === 1 ? "dia" : "dias"}</small>`) : "–";
@@ -1577,7 +1910,7 @@ document.addEventListener("click", async e => {
     case "addLote": addLote(id); break;
     case "editar": abrirForm({ id }); break;
     case "completar": completarTodos(); break;
-    case "sincronizar": Sync.falhas = 0; agendarSync(0); toast("Sincronizando…"); break;
+    case "sincronizar": Sync.falhas = 0; if(Sync.estado === "desligado") setEstadoSync("inicio"); agendarSync(0); toast("Sincronizando…"); break;
     case "backup": abrirBackup(); break;
     case "salvarNuvem": salvarCopiaNuvem(b); break;
     case "restaurarNuvem": restaurarDaNuvem(b.dataset.nome, b); break;
@@ -1585,6 +1918,12 @@ document.addEventListener("click", async e => {
     case "enviarBackup": gerarArquivo(b, true); break;
     case "restaurarArquivo": $("#arqBackup").click(); break;
     case "restaurarJuntar": aplicarRestauracao(false); break;
+    case "receberAtualizar": aplicarRecebido(); break;
+    case "salvarBackupAgora": salvarBackupAgora(); break;
+    case "salvarArquivoPronto": salvarArquivoPronto(); break;
+    case "baixarDeNovo": if(bkPronto){ baixarArquivo(bkPronto.conteudo, bkPronto.nome); toast("Salvo de novo em Downloads."); } break;
+    case "adiarBackup": auto.adiado = Date.now() + 3 * 36e5; gravarAuto(); verificarLembrete(); toast("Tudo bem, aviso de novo daqui a 3 horas."); break;
+    case "ativarNotif": ativarNotificacao(); break;
     case "restaurarSubstituir": {
       const n = restaurando ? restaurando.lista.length : 0;
       if(confirm(`Substituir a lista em TODOS os aparelhos pelos ${n} produto(s) do backup? O que foi cadastrado depois do backup será apagado.`)) aplicarRestauracao(true);
@@ -1606,12 +1945,17 @@ document.addEventListener("click", async e => {
   }
 });
 document.addEventListener("change", async e => {
+  if(e.target.id === "autoFreq" || e.target.id === "autoHora"){
+    auto.freq = parseInt($("#autoFreq").value, 10) || 0;
+    auto.hora = parseInt($("#autoHora").value, 10) || 17;
+    auto.adiado = 0; gravarAuto(); await registrarLembrete();
+    if(folhaAtual && folhaAtual.tipo === "backup"){ const y = $(".folha") ? $(".folha").scrollTop : 0; abrirBackup(); if($(".folha")) $(".folha").scrollTop = y; }
+    verificarLembrete();
+    return;
+  }
   if(e.target.id === "arqBackup" && e.target.files[0]){
     const arq = e.target.files[0]; e.target.value = "";
-    if(arq.size > 60e6){ toast("Arquivo grande demais para ser um backup do app."); return; }
-    const bk = lerBackup(await arq.text());
-    if(!bk){ toast("Esse arquivo não é um backup do app de validade."); return; }
-    abrirRestaurar(bk, "Arquivo");
+    abrirArquivoEscolhido(arq);
     return;
   }
   if((e.target.id === "arqFoto" || e.target.id === "arqGaleria") && e.target.files[0]){
