@@ -277,7 +277,7 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 <main class="conteudo">
   <h2 class="titulo-lista"><b id="tituloLista">Todos os produtos</b><span id="qtdLista"></span></h2>
   <div id="lista"><p class="carregando">Carregando produtos…</p></div>
-  <p class="estado">Dados salvos neste aparelho.</p>
+  <p class="estado" id="estado">Conectando…</p>
 </main>
 
 <div class="rodape">
@@ -311,7 +311,7 @@ let filtro = null, marcaSel = null, termo = "", carregado = false;
 const LS_P = "validade:produtos", LS_C = "validade:config";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const urlSegura = u => (typeof u === "string" && (u.startsWith("https://") || u.startsWith("data:image/"))) ? u : "";
+const urlSegura = u => (typeof u === "string" && (u.startsWith("https://") || u.startsWith("data:image/") || /^\/api\/foto\?f=[A-Za-z0-9_-]+\.jpg$/.test(u))) ? u : "";
 
 /* ===== datas e cores ===== */
 function hoje(){ const h = new Date(); h.setHours(0,0,0,0); return h; }
@@ -379,6 +379,8 @@ async function carregar(){
   lista.forEach(p => produtos.set(p.id, p));
   carregado = true;
   render();
+  await carregarSync();
+  sincronizar();
 }
 let tGravar;
 function gravar(){
@@ -391,8 +393,107 @@ function gravar(){
     }
   }, 250);
 }
-function salvarProduto(p){ p.atualizado = Date.now(); produtos.set(p.id, p); render(); gravar(); }
-function excluirProduto(id){ produtos.delete(id); if(marcaSel && !marcasAtuais().some(m => m.chave === marcaSel)) marcaSel = null; render(); gravar(); }
+function salvarProduto(p){ p.atualizado = Date.now(); produtos.set(p.id, p); Sync.apagados.delete(p.id); render(); gravar(); marcarPendente(p.id); }
+function excluirProduto(id){ produtos.delete(id); Sync.apagados.set(id, Date.now()); if(marcaSel && !marcasAtuais().some(m => m.chave === marcaSel)) marcaSel = null; render(); gravar(); marcarPendente(id); }
+
+/* ===== sincronização entre celulares (dados guardados no GitHub) ===== */
+const Sync = { estado: "inicio", pendentes: new Set(), apagados: new Map(), iniciado: false, ultima: 0, rodando: false, timer: null };
+async function carregarSync(){
+  try{
+    const x = await IDB.get("sync");
+    if(x){ (x.pendentes || []).forEach(i => Sync.pendentes.add(i)); Object.entries(x.apagados || {}).forEach(([k, v]) => Sync.apagados.set(k, v)); Sync.iniciado = !!x.iniciado; }
+  }catch(e){}
+}
+function gravarSync(){ IDB.set("sync", { pendentes: [...Sync.pendentes], apagados: Object.fromEntries(Sync.apagados), iniciado: Sync.iniciado }).catch(() => {}); }
+function marcarPendente(id){ Sync.pendentes.add(id); gravarSync(); if(Sync.estado !== "desligado") agendarSync(1500); atualizarEstado(); }
+function agendarSync(ms){ clearTimeout(Sync.timer); Sync.timer = setTimeout(sincronizar, ms); }
+async function chamarApi(url, opt = {}){
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 30000);
+  try{ const r = await fetch(url, { ...opt, signal: ctrl.signal, cache: "no-store" }); const j = await r.json().catch(() => null); return { ok: r.ok && !!j, status: r.status, j }; }
+  catch(e){ return { ok: false, status: 0, j: null }; }
+  finally{ clearTimeout(t); }
+}
+function mesclar(lista){
+  let mudou = false;
+  for(const r of lista || []){
+    if(!r || typeof r.id !== "string") continue;
+    const l = produtos.get(r.id);
+    const la = l ? l.atualizado : Sync.apagados.get(r.id);
+    if(Sync.pendentes.has(r.id) && (la || 0) >= (r.atualizado || 0)) continue; // a mudança deste celular é mais nova
+    if(r.excluido){
+      if(l && (l.atualizado || 0) <= r.atualizado){ produtos.delete(r.id); mudou = true; }
+      Sync.pendentes.delete(r.id); Sync.apagados.delete(r.id);
+      continue;
+    }
+    if(!l || (r.atualizado || 0) > (l.atualizado || 0)){
+      produtos.set(r.id, { ...r, lotes: (r.lotes || []).map(x => ({ ...x })) });
+      Sync.pendentes.delete(r.id); mudou = true;
+    }
+  }
+  if(mudou){ gravar(); render(); atualizarFolhaAberta(); }
+}
+async function sincronizar(){
+  if(Sync.rodando){ agendarSync(3000); return; }
+  Sync.rodando = true;
+  try{
+    const g = await chamarApi("/api/dados");
+    if(!g.ok){ setEstadoSync(g.status === 503 || g.status === 404 || g.status === 405 ? "desligado" : "offline"); return; }
+    if(!Sync.iniciado){ produtos.forEach((p, id) => Sync.pendentes.add(id)); Sync.iniciado = true; gravarSync(); }
+    mesclar(g.j.produtos);
+    // fotos tiradas neste celular: sobem primeiro
+    for(const id of [...Sync.pendentes]){
+      const p = produtos.get(id);
+      if(p && typeof p.foto === "string" && p.foto.startsWith("data:")){
+        setEstadoSync("enviando");
+        const f = await chamarApi("/api/foto", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, imagem: p.foto }) });
+        if(!f.ok || !f.j.url){ setEstadoSync("offline"); return; }
+        const atual = produtos.get(id); if(atual && atual.foto === p.foto){ atual.foto = f.j.url; gravar(); }
+      }
+    }
+    const ids = [...Sync.pendentes];
+    for(let i = 0; i < ids.length; i += 40){
+      const grupo = ids.slice(i, i + 40);
+      const lote = grupo.map(id => produtos.has(id) ? produtos.get(id) : (Sync.apagados.has(id) ? { id, excluido: true, atualizado: Sync.apagados.get(id) } : null)).filter(Boolean);
+      grupo.filter(id => !produtos.has(id) && !Sync.apagados.has(id)).forEach(id => Sync.pendentes.delete(id));
+      if(!lote.length) continue;
+      setEstadoSync("enviando");
+      const enviados = lote.map(p => [p.id, p.atualizado]);
+      const r = await chamarApi("/api/dados", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mudancas: lote }) });
+      if(!r.ok){ setEstadoSync("offline"); return; }
+      for(const [id, at] of enviados){
+        const p = produtos.get(id), agora = p ? p.atualizado : Sync.apagados.get(id);
+        if(agora === at){ Sync.pendentes.delete(id); if(!p) Sync.apagados.delete(id); }
+      }
+      gravarSync();
+      mesclar(r.j.produtos);
+    }
+    Sync.ultima = Date.now();
+    setEstadoSync("ok");
+  }finally{
+    Sync.rodando = false;
+    agendarSync(Sync.estado === "desligado" ? 300000 : 40000);
+  }
+}
+function setEstadoSync(e){ Sync.estado = e; atualizarEstado(); }
+function textoSync(){
+  const n = Sync.pendentes.size;
+  switch(Sync.estado){
+    case "ok": return n ? `Enviando ${n} alteração(ões)…` : `Sincronizado entre os celulares · ${new Date(Sync.ultima).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    case "enviando": return `Enviando ${n} alteração(ões)…`;
+    case "offline": return `Sem conexão com o servidor${n ? ` · ${n} alteração(ões) esperando para enviar` : ""}`;
+    case "desligado": return "Sincronização ainda não ligada: os dados ficam só neste aparelho.";
+    default: return "Conectando…";
+  }
+}
+function atualizarEstado(){ const el = $("#estado"); if(el) el.textContent = textoSync(); const c = $("#estadoSyncCfg"); if(c) c.textContent = textoSync(); }
+function atualizarFolhaAberta(){
+  if(!folhaAtual || folhaAtual.tipo !== "produto") return;
+  if(!produtos.has(folhaAtual.id)){ fecharFolha(); return; }
+  const foco = document.activeElement && document.activeElement.closest && document.activeElement.closest(".novo-lote");
+  if(!foco) abrirProduto(folhaAtual.id);
+}
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible" && carregado) agendarSync(300); });
+window.addEventListener("online", () => agendarSync(300));
 function salvarConfig(){ try{ localStorage.setItem(LS_C, JSON.stringify(cfg)); }catch(e){} render(); }
 
 /* ===== busca automática de produto e foto (Open Food Facts) ===== */
@@ -444,6 +545,8 @@ async function buscarPorNome(nome){
 }
 // guarda a foto dentro do app (funciona sem internet); se o site não deixar, guarda o link
 async function guardarFoto(url){
+  // as fotos da internet ficam como link (o app guarda uma cópia para usar sem internet)
+  return url;
   if(!url || url.startsWith("data:")) return url;
   try{
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 10000);
@@ -675,7 +778,7 @@ function abrirForm({ codigo = "", id = null } = {}){
       <div><label for="fQtd">Quantidade</label><input class="campo" type="number" id="fQtd" min="1" value="1" inputmode="numeric"></div>
     </div>`}
     <div class="acoes"><button class="btn btn-pri" data-acao="salvarForm" data-id="${esc(id || "")}">${p ? "Salvar alterações" : "Cadastrar produto"}</button></div>
-    <p class="credito">Identificação pela foto: Google Gemini. Fotos e dados: Open Food Facts.</p>`, { tipo:"form", id });
+    <p class="credito">Leitura da foto feita no próprio celular (Tesseract). Fotos e dados: Open Food Facts.</p>`, { tipo:"form", id });
   mostrarFoto();
   if(!p && codigo) preencherPorCodigo(codigo);
   else if(!p) setTimeout(() => { const n = $("#fNome"); if(n) n.focus(); }, 60);
@@ -751,8 +854,138 @@ const ERROS_IA = {
   sem_servidor: "A identificação pela foto não está disponível neste endereço.",
   limite: "O limite grátis de identificações por foto acabou por agora. Tente de novo mais tarde.",
   rede: "Sem internet para identificar a foto.",
-  falha: "Não consegui identificar o produto pela foto."
+  falha: "Não consegui identificar o produto pela foto.",
+  leitor: "Não consegui abrir o leitor de fotos (na primeira vez ele precisa de internet)."
 };
+/* ===== leitura da foto no próprio celular (sem chave, sem cadastro) ===== */
+const MARCAS_COMUNS = ["Nestlé","Ninho","Molico","Nescau","Nescafé","Italac","Piracanjuba","Itambé","Elegê","Parmalat","Batavo","Vigor","Danone","Activia","Danoninho","Yakult","Betânia","Tirolez","Polenghi","Président","Quatá","Frimesa","Aurora","Sadia","Perdigão","Seara","Swift","Friboi","Pif Paf","Rezende","Qualy","Doriana","Primor","Delícia","Aviação","Camil","Tio João","Prato Fino","Kicaldo","Namorado","Dona Benta","Renata","Barilla","Adria","Santa Amália","Fortaleza","Petybon","Galo","Pilão","Melitta","3 Corações","Café do Ponto","Pelé","Maggi","Knorr","Hellmann's","Heinz","Quero","Elefante","Fugini","Predilecta","Yoki","Kitano","Sazón","Arisco","Liza","Soya","Salada","Cocinero","Gallo","Andorinha","Toddy","Ovomaltine","Mupy","Ades","Del Valle","Maguary","Tang","Fresh","Sukita","Fanta","Coca-Cola","Pepsi","Guaraná Antarctica","Antarctica","Kuat","Schweppes","Dolly","Brahma","Skol","Heineken","Budweiser","Itaipava","Amstel","Original","Bauducco","Marilan","Nabisco","Oreo","Trakinas","Passatempo","Club Social","Piraquê","Vitarella","Fortaleza","Mabel","Tostines","Lacta","Garoto","Hershey's","Bis","Kibon","Pullman","Wickbold","Plus Vita","Visconti","Panco","Seven Boys","Ana Maria","Ruffles","Doritos","Cheetos","Elma Chips","Fandangos","Pringles","Gomes da Costa","Coqueiro","Bombril","Ypê","Omo","Brilhante","Ariel","Tixan","Minuano","Veja","Pinho Sol","Comfort","Downy","Colgate","Sorriso","Oral-B","Close Up","Palmolive","Dove","Rexona","Nivea","Lux","Protex","Seda","Elseve","Pantene","Johnson's","Huggies","Pampers","Neve","Personal","Scott","Kleenex","Sadia","Bob's","Mococa","Leco","Paulista","Jussara","Shefa","Lebom","Aurora","Bem Te Vi","União","Caravelas","Cristal","Guarani","Da Barra","Native","Mãe Terra","Jasmine","Vitao","Kodilar","Zero Cal","Linea","Gatorade","Powerade","Red Bull","Monster","Burn","Ajinomoto","Hikari","Sakura","Karui","Lacfree","Zymil","Batavinho","Chamyto","Nesfit","Neston","Mucilon","Nestogeno","Aptamil","Milnutri","Pedigree","Whiskas","Friskies","Golden","Premier","Purina"];
+const PALAVRAS_FORA = new Set("ingredientes contem contém gluten glúten lactose peso liquido líquido conteudo conteúdo informacao informação nutricional valor energetico energético porcao porção fab val vence validade lote fabricacao fabricação industria indústria brasileira brasil consumir antes para com sem uma por cada embalagem produto alimento kcal sodio sódio gorduras totais saturadas trans carboidratos proteinas proteínas fibra fibras alimentar acucares açúcares adicionados manter local seco fresco refrigerado temperatura ambiente apos após aberto abrir site www http com sac ltda cnpj registro ministerio ministério agricultura saude saúde quantidade aproximadamente aqui veja dica receita modo preparo".split(" "));
+const CORRECOES = { logurte: "Iogurte", lOGURTE: "IOGURTE", lntegral: "Integral", lnstantaneo: "Instantâneo", lnstantâneo: "Instantâneo", lsotonico: "Isotônico" };
+function semAcento(s){ return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+function eanValido(c){
+  if(!/^(\d{8}|\d{12,14})$/.test(c)) return false;
+  const d = c.split("").map(Number), ck = d.pop(); let s = 0;
+  d.reverse().forEach((n, i) => { s += n * (i % 2 === 0 ? 3 : 1); });
+  return (10 - (s % 10)) % 10 === ck;
+}
+function isoData(a, m, d){
+  if(a < 100) a += 2000;
+  const dt = new Date(a, m - 1, d);
+  if(dt.getFullYear() !== a || dt.getMonth() !== m - 1 || dt.getDate() !== d) return "";
+  return `${a}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function datasNoTexto(t){
+  const res = [];
+  const re1 = /(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/g; let m;
+  while((m = re1.exec(t))){ const v = isoData(+m[3], +m[2], +m[1]); if(v) res.push({ v, i: m.index }); }
+  const re2 = /(?<![\d\/.\-])(\d{1,2})\s?[\/.\-]\s?(20\d{2})(?!\d)/g;
+  while((m = re2.exec(t))){ const mes = +m[1], ano = +m[2]; if(mes >= 1 && mes <= 12){ const ult = new Date(ano, mes, 0).getDate(); res.push({ v: isoData(ano, mes, ult), i: m.index }); } }
+  return res;
+}
+function escolherValidade(t, diasAte){
+  const ds = datasNoTexto(t).filter(x => { const n = diasAte(x.v); return n > -60 && n < 2000; });
+  if(!ds.length) return "";
+  const up = semAcento(t);
+  const marcadas = ds.filter(x => /(val|venc|consumir|v\.|v:|validade)[^\d]{0,14}$/.test(up.slice(Math.max(0, x.i - 22), x.i)));
+  const pool = marcadas.length ? marcadas : ds;
+  return pool.map(x => x.v).sort().pop();
+}
+function acharMarca(texto, extras){
+  const t = " " + semAcento(texto).replace(/[^a-z0-9']+/g, " ") + " ";
+  let melhor = "";
+  for(const m of [...extras, ...MARCAS_COMUNS]){
+    const n = semAcento(m).replace(/[^a-z0-9']+/g, " ").trim();
+    if(n.length >= 3 && t.includes(" " + n + " ") && n.length > semAcento(melhor).length) melhor = m;
+  }
+  return melhor;
+}
+function tituloCaso(s){ return s.toLowerCase().replace(/(^|\s)(\S)/g, (a, b, c) => b + c.toUpperCase()); }
+function analisarTextoFoto(dados, marcasConhecidas, diasAte){
+  const texto = (dados.text || "").replace(/\s+/g, " ");
+  const palavras = (dados.words || []).map(w => ({ t: CORRECOES[w.text] || w.text, c: w.confidence, h: w.bbox.y1 - w.bbox.y0, y: (w.line && w.line.bbox) ? w.line.bbox.y0 : w.bbox.y0, x: w.bbox.x0 }));
+  const textoCorr = palavras.length ? palavras.map(p => p.t).join(" ") : texto;
+  // código de barras impresso
+  let codigo = "";
+  for(const m of textoCorr.replace(/(\d)\s(?=\d)/g, "$1").match(/\d{8,14}/g) || []) if(eanValido(m)){ codigo = m; break; }
+  const marca = acharMarca(textoCorr, marcasConhecidas);
+  const marcaN = semAcento(marca).split(/\s+/);
+  const tam = lerTamanho(textoCorr);
+  const validade = escolherValidade(textoCorr, diasAte);
+  // nome: as palavras maiores (letras grandes da frente da embalagem)
+  const cand = palavras.filter(p => p.c >= 55 && /^[A-Za-zÀ-ÿ'’\-]{3,}$/.test(p.t) && !PALAVRAS_FORA.has(semAcento(p.t)) && !marcaN.includes(semAcento(p.t)));
+  let nome = "";
+  if(cand.length){
+    const maxH = Math.max(...cand.map(p => p.h));
+    const grandes = cand.filter(p => p.h >= maxH * 0.55).sort((a, b) => (Math.abs(a.y - b.y) < Math.min(a.h, b.h) * 0.6 ? 0 : a.y - b.y) || (a.x - b.x));
+    const vistos = new Set(), sel = [];
+    for(const p of grandes){ const k = semAcento(p.t); if(!vistos.has(k)){ vistos.add(k); sel.push(p.t); } if(sel.length >= 5) break; }
+    nome = tituloCaso(sel.join(" "));
+  }
+  const chaves = cand.sort((a, b) => b.h - a.h).slice(0, 6).map(p => p.t);
+  return { nome, marca, tam, codigo, validade, chaves };
+}
+
+let ocrPromise = null, ocrPronto = false, iaServidor = null;
+function carregarScript(src){
+  return new Promise((ok, falha) => {
+    if([...document.scripts].some(x => x.src === src) && window.Tesseract) return ok();
+    const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = () => { el.remove(); falha(new Error("script")); };
+    document.head.appendChild(el);
+  });
+}
+function prepararOCR(){
+  if(!ocrPromise) ocrPromise = (async () => {
+    await carregarScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    const w = await Tesseract.createWorker("por", 1, {
+      workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
+      corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
+      langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/por@1.0.0/4.0.0_best_int"
+    });
+    ocrPronto = true; return w;
+  })().catch(e => { ocrPromise = null; throw e; });
+  return ocrPromise;
+}
+const GIRA = `<span class="girando-peq"></span> `;
+async function lerFotoNoCelular(fotoIA){
+  try{
+    msgBusca(GIRA + (ocrPronto ? "Lendo a embalagem…" : "Preparando o leitor de fotos (só na primeira vez, uns segundos)…"), "ok-msg");
+    const w = await prepararOCR();
+    msgBusca(GIRA + "Lendo a embalagem…", "ok-msg");
+    const { data } = await w.recognize(fotoIA);
+    const a = analisarTextoFoto(data, marcasAtuais().map(m => m.nome), dias);
+    let achado = null;
+    if(!a.codigo && (a.marca || a.chaves.length)){
+      msgBusca(GIRA + "Conferindo o produto na base…", "ok-msg");
+      const q = [a.marca, ...a.chaves.slice(0, 4)].filter(Boolean).join(" ");
+      const lista = q.length >= 3 ? await buscarPorNome(q) : [];
+      const chavesN = a.chaves.map(semAcento).filter(k => k.length >= 4);
+      const marcaN = semAcento(a.marca).split(" ")[0];
+      achado = lista.find(o => {
+        const n = semAcento(`${o.nome} ${o.marca}`);
+        return (!marcaN || semAcento(o.marca).includes(marcaN)) && chavesN.some(k => n.includes(k));
+      }) || null;
+    }
+    const tam = a.tam || (achado && achado.tam);
+    return {
+      encontrado: !!(a.nome || a.marca || a.codigo || achado),
+      nome: (achado && achado.nome) || a.nome,
+      marca: (achado && achado.marca) || a.marca,
+      tamanho: tam ? { numero: parseFloat(String(tam.num).replace(",", ".")), unidade: tam.un } : null,
+      codigo_barras: a.codigo || "",
+      validade: a.validade,
+      fotoSugerida: achado && achado.foto ? achado : null
+    };
+  }catch(e){ return { erro: "leitor" }; }
+}
+// usa a IA do servidor se ela estiver ligada; se não, lê a foto aqui mesmo no celular
+async function identificarFoto(fotoIA){
+  if(iaServidor !== false){
+    const r = await identificarNaIA(fotoIA);
+    if(!r.erro){ iaServidor = true; return r; }
+    if(r.erro === "sem_chave" || r.erro === "sem_servidor") iaServidor = false;
+  }
+  return lerFotoNoCelular(fotoIA);
+}
 function dataValida(v){ if(!/^\d{4}-\d{2}-\d{2}$/.test(v || "")) return false; const n = dias(v); return n > -60 && n < 2000; }
 async function identificarPorFoto(arq){
   const minha = buscaForm = Symbol();
@@ -765,7 +998,8 @@ async function identificarPorFoto(arq){
   const btns = document.querySelectorAll('[data-acao="tirarFoto"],[data-acao="salvarForm"]'); btns.forEach(b => b.disabled = true);
   const liberar = () => btns.forEach(b => b.disabled = false);
 
-  const [codFoto, ia] = await Promise.all([lerCodigoNaFoto(arq), identificarNaIA(fotoIA)]);
+  const codFoto = await lerCodigoNaFoto(arq);
+  const ia = await identificarFoto(fotoIA);
   if(buscaForm !== minha){ liberar(); return; }
   const preenchidos = [];
   const marcar = (sel, v, nome) => { const el = $(sel); if(el && !el.readOnly && !el.value.trim() && v){ el.value = v; preenchidos.push(nome); el.classList.add("auto"); } };
@@ -797,6 +1031,7 @@ async function identificarPorFoto(arq){
     if(base.tam && !$("#fTamNum").value.trim()){ $("#fTamNum").value = base.tam.num; $("#fTamUn").value = base.tam.un; preenchidos.push("tamanho"); }
     if(base.foto) cand.push(base);
   }
+  if(!cand.length && ia && ia.fotoSugerida) cand.push(ia.fotoSugerida);
   const nome = $("#fNome").value.trim(), marca = $("#fMarca").value.trim();
   if(!cand.length && nome.length >= 3){
     cand = await buscarPorNome([nome, marca].filter(Boolean).join(" "));
@@ -952,6 +1187,11 @@ function abrirConfig(){
     <p class="dica">Em dias. Acima do amarelo, o produto fica verde. Produto que já passou da data fica vinho, como vencido.</p>
     <div class="acoes"><button class="btn btn-pri" data-acao="salvarConfig">Salvar cores</button></div>
     <div class="secao">
+      <h4>Celulares conectados</h4>
+      <p class="dica" id="estadoSyncCfg">${esc(textoSync())}</p>
+      <button class="btn btn-sec btn-bloco" style="margin-top:8px" data-acao="sincronizar">Sincronizar agora</button>
+    </div>
+    <div class="secao">
       <h4>Completar produtos já cadastrados</h4>
       <p class="dica">${faltando ? `${faltando} produto(s) sem foto, marca ou tamanho. O app procura pelo código de barras e, se não achar, pelo nome.` : "Todos os produtos já estão completos."}</p>
       ${faltando ? `<button class="btn btn-sec btn-bloco" style="margin-top:8px" data-acao="completar" id="btnCompletar">${completando ? "Buscando…" : "Buscar fotos e dados que faltam"}</button><p class="dica">Pode levar alguns minutos. Deixe o app aberto.</p>` : ""}
@@ -994,6 +1234,7 @@ document.addEventListener("click", async e => {
     case "addLote": addLote(id); break;
     case "editar": abrirForm({ id }); break;
     case "completar": completarTodos(); break;
+    case "sincronizar": agendarSync(0); toast("Sincronizando…"); break;
     case "limparZerados": { const p = produtos.get(id); if(p){ salvarProduto({ ...p, lotes:p.lotes.filter(l => l.qtd > 0) }); abrirProduto(id); } break; }
     case "excluir": { const p = produtos.get(id); if(p && confirm(`Excluir "${p.nome}" e todas as validades dele?`)){ excluirProduto(id); fecharFolha(); toast("Produto excluído"); } break; }
     case "salvarConfig": {

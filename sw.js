@@ -1,5 +1,5 @@
 // Guarda o app no celular para abrir rápido e funcionar mesmo sem internet.
-const CACHE = "validade-v2";
+const CACHE = "validade-v3";
 const FOTOS = "validade-fotos-v1";
 const ARQUIVOS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
@@ -9,20 +9,26 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== FOTOS).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+function primeiroCache(nome, req) {
+  return caches.open(nome).then(c => c.match(req).then(r => r || fetch(req).then(res => { if (res.ok || res.type === "opaque") c.put(req, res.clone()); return res; })));
+}
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const url = e.request.url;
-  // fotos dos produtos: usa a guardada e só baixa se ainda não tiver
-  if (url.includes("images.openfoodfacts.org") || url.includes("images.openbeautyfacts.org") || url.includes("images.openproductsfacts.org")) {
-    e.respondWith(caches.open(FOTOS).then(c => c.match(e.request).then(r => r || fetch(e.request).then(res => { if (res.ok || res.type === "opaque") c.put(e.request, res.clone()); return res; }))));
+  const mesmo = url.startsWith(self.location.origin);
+  // fotos dos produtos (da internet ou tiradas pela equipe): guardadas no celular
+  if (/images\.open(food|beauty|products)facts\.org/.test(url) || (mesmo && url.includes("/api/foto?"))) {
+    e.respondWith(primeiroCache(FOTOS, e.request));
     return;
   }
-  // buscas de produto vão sempre direto para a internet
-  if (url.includes("openfoodfacts.org") || url.includes("openbeautyfacts.org") || url.includes("openproductsfacts.org")) return;
+  // leitor de fotos: baixa uma vez e guarda
+  if (url.includes("tesseract")) { e.respondWith(primeiroCache(CACHE, e.request)); return; }
+  // dados e buscas sempre direto na internet
+  if ((mesmo && url.includes("/api/")) || /open(food|beauty|products)facts\.org/.test(url)) return;
   // o resto: busca a versão nova; sem sinal, usa a guardada
   e.respondWith(
     fetch(e.request).then(r => {
-      if (r.ok && (url.startsWith(self.location.origin) || url.includes("html5-qrcode") || url.includes("fonts."))) {
+      if (r.ok && (mesmo || url.includes("html5-qrcode") || url.includes("fonts."))) {
         const copia = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copia));
       }
       return r;
