@@ -32,8 +32,11 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
-      const arq = await lerArquivo(ARQUIVO);
-      return res.status(200).json({ produtos: lerLista(arq) });
+      // o celular manda a marca da última lista que recebeu; se nada mudou, a resposta é só { igual: true }
+      const etag = String(req.query.etag || "").slice(0, 200);
+      const arq = await lerArquivo(ARQUIVO, etag || undefined);
+      if (arq && arq.igual) return res.status(200).json({ igual: true, etag });
+      return res.status(200).json({ produtos: lerLista(arq), etag: (arq && arq.etag) || "" });
     }
     if (req.method !== "POST") return res.status(405).json({ erro: "metodo" });
 

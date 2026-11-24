@@ -4,9 +4,15 @@ import { configurado, gh, gravarArquivo, origemOk, lerCorpo } from "./_github.js
 export default async function handler(req, res) {
   if (!configurado()) return res.status(503).json({ erro: "sem_token" });
   try {
-    if (req.method === "GET") {
+    if (req.method === "GET" || req.method === "HEAD") {
       const nome = String(req.query.f || "");
       if (!/^[A-Za-z0-9_-]{1,160}\.jpg$/.test(nome)) return res.status(400).end();
+      // HEAD só confere se a foto ainda existe (usado ao restaurar um backup)
+      if (req.method === "HEAD") {
+        const h = await gh(`fotos/${nome}`, { method: "HEAD" });
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(h.ok ? 200 : h.status === 404 ? 404 : 502).end();
+      }
       const r = await gh(`fotos/${nome}`, { accept: "application/vnd.github.raw+json" });
       if (!r.ok) return res.status(r.status === 404 ? 404 : 502).end();
       const buf = Buffer.from(await r.arrayBuffer());
