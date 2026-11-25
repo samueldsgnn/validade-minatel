@@ -1,5 +1,5 @@
 // Guarda o app no celular para abrir rápido e funcionar mesmo sem internet.
-const CACHE = "validade-v6";
+const CACHE = "validade-v7";
 const RECEBIDO = "validade-recebido";
 const FOTOS = "validade-fotos-v1";
 const ARQUIVOS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];

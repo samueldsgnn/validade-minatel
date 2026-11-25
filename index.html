@@ -303,6 +303,27 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
 .bk-feito b{font-weight:900;font-size:1.1rem}
 .bk-feito span:not(.bk-check){color:var(--tinta-2);font-size:.9rem}
 .bk-feito code{font-size:.78rem;color:var(--tinta-2);word-break:break-all;margin-top:4px}
+/* cadastrar falando */
+[hidden]{display:none!important}
+.busca .mic{border:0;background:var(--azul-suave);color:var(--azul);width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
+.entrada-rapida{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.entrada-rapida .btn-foto-ia{margin:0;padding:10px 12px;gap:10px;width:100%}
+.entrada-rapida .btn-foto-ia svg{flex:none}
+.btn-voz{background:var(--azul-suave);color:var(--azul)}
+.btn-voz[aria-pressed="true"]{background:var(--vermelho-marca);color:#fff}
+.voz{background:var(--azul-suave);border-radius:16px;padding:12px 12px 10px;margin:0 0 10px}
+.voz-topo{display:flex;align-items:center;gap:10px}
+.voz-topo b{flex:1;font-size:.92rem;line-height:1.25}
+.voz-luz{width:14px;height:14px;border-radius:50%;background:var(--cinza);flex:none}
+.voz.ouvindo .voz-luz{background:var(--vermelho-marca);animation:pulsa 1.1s ease-in-out infinite}
+@keyframes pulsa{0%,100%{box-shadow:0 0 0 0 rgba(232,41,31,.5)}50%{box-shadow:0 0 0 9px rgba(232,41,31,0)}}
+.voz-fala{margin:8px 0 0;font-size:1.05rem;font-weight:700;line-height:1.3;color:var(--tinta)}
+.voz-fala:empty{display:none}
+.voz .dica{margin:6px 0 0}
+.voz textarea{margin-top:8px;resize:vertical}
+.lote-cab{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lote-cab label{margin-bottom:6px}
+@media (prefers-reduced-motion: reduce){.voz.ouvindo .voz-luz{animation:none;box-shadow:0 0 0 4px rgba(232,41,31,.35)}}
 </style>
 </head>
 <body>
@@ -323,6 +344,7 @@ label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
     <div class="busca">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="busca" type="search" placeholder="Buscar produto, marca ou código" aria-label="Buscar produto, marca ou código de barras" autocomplete="off">
+      <button class="mic" data-acao="falarNovo" aria-label="Cadastrar produto falando"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/></svg></button>
       <button class="scan" data-acao="bipar" aria-label="Bipar produto">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10.5 8v8M14 8v8M17 8v8"/></svg>Bipar
       </button>
@@ -1334,12 +1356,14 @@ function render(){
 /* ===== folha ===== */
 let folhaAtual = null;
 function abrirFolha(html, info){
+  pararVoz(true); vozToken = null;
   $("#folha").innerHTML = `<div class="alca"></div>` + html;
   $("#vela").classList.add("aberta");
   document.body.style.overflow = "hidden";
   folhaAtual = info || null;
 }
 async function fecharFolha(){
+  pararVoz(true); vozToken = null;
   await pararScanner();
   $("#vela").classList.remove("aberta");
   document.body.style.overflow = "";
@@ -1416,14 +1440,20 @@ function mostrarFoto(){
 function carregandoFoto(on){ const el = $("#fotoMini"); if(el && on) el.innerHTML = `<span class="girando" aria-label="Procurando foto"></span>`; else mostrarFoto(); }
 function msgBusca(html, tipo){ const m = $("#msgBusca"); if(m){ m.className = tipo || "dica"; m.innerHTML = html; } }
 
-function abrirForm({ codigo = "", id = null } = {}){
+function abrirForm({ codigo = "", id = null, falar = false } = {}){
   const p = id ? produtos.get(id) : null;
   fotoTemp = p ? p.foto || null : null; fotoManual = false; fotoPropria = null;
   const tam = p ? lerTamanho(p.tamanho) : null;
   abrirFolha(`${topoFolha(p ? "Editar produto" : "Novo produto")}
-    <button class="btn btn-pri btn-bloco btn-foto-ia" data-acao="tirarFoto">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      <span>Fotografar produto<small>o app preenche o resto sozinho</small></span></button>
+    <div class="entrada-rapida">
+      <button class="btn btn-pri btn-foto-ia" data-acao="tirarFoto">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span>Fotografar<small>preenche sozinho</small></span></button>
+      <button class="btn btn-foto-ia btn-voz" data-acao="falar" aria-pressed="false">
+        ${ICONE_MIC}
+        <span>Falar<small>${p ? "nome, marca e peso" : "nome, peso e qtd."}</small></span></button>
+    </div>
+    ${painelVoz("form")}
     <p id="msgBusca" class="dica">${!p && codigo ? `Código <b>${esc(codigo)}</b>` : ""}</p>
     <div class="foto-pegar">
       <div class="foto-mini" id="fotoMini"></div>
@@ -1457,7 +1487,8 @@ function abrirForm({ codigo = "", id = null } = {}){
     <p class="credito">Leitura da foto feita no próprio celular (Tesseract). Fotos e dados: Open Food Facts.</p>`, { tipo:"form", id });
   mostrarFoto();
   if(!p && codigo) preencherPorCodigo(codigo);
-  else if(!p) setTimeout(() => { const n = $("#fNome"); if(n) n.focus(); }, 60);
+  else if(!p && !falar) setTimeout(() => { const n = $("#fNome"); if(n) n.focus(); }, 60);
+  if(falar) iniciarVoz();
 }
 function preencherSeVazio(sel, v){ const el = $(sel); if(el && !el.value.trim() && v) el.value = v; }
 async function preencherPorCodigo(codigo){
@@ -1757,6 +1788,286 @@ async function salvarForm(id){
   abrirProduto(novoId, !val);
 }
 
+/* ===== cadastrar falando (microfone) ===== */
+const Reconhecedor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const NUM_PAL = { zero:0, um:1, uma:1, dois:2, duas:2, tres:3, quatro:4, cinco:5, seis:6, sete:7, oito:8, nove:9, dez:10, onze:11, doze:12, treze:13, quatorze:14, catorze:14, quinze:15, dezesseis:16, dezasseis:16, dezessete:17, dezoito:18, dezenove:19, vinte:20, trinta:30, quarenta:40, cinquenta:50, sessenta:60, setenta:70, oitenta:80, noventa:90, cem:100, cento:100, duzentos:200, duzentas:200, trezentos:300, trezentas:300, quatrocentos:400, quatrocentas:400, quinhentos:500, quinhentas:500, seiscentos:600, seiscentas:600, setecentos:700, setecentas:700, oitocentos:800, oitocentas:800, novecentos:900, novecentas:900, mil:1000 };
+const MESES = { janeiro:1, fevereiro:2, marco:3, abril:4, maio:5, junho:6, julho:7, agosto:8, setembro:9, outubro:10, novembro:11, dezembro:12 };
+const RE_MES = "janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro";
+const PALAVRAS_LIGA = new Set(["de","do","da","dos","das","com","e","o","a","os","as","um","uma","que","tem","é","e","no","na","pra","para"]);
+// troca números falados por extenso ("cento e setenta" → 170)
+function numerosFalados(t){
+  const tk = t.split(/\s+/).filter(Boolean), saida = [];
+  for(let i = 0; i < tk.length; i++){
+    const v = NUM_PAL[semAcento(tk[i])];
+    if(v === undefined){ saida.push(tk[i]); continue; }
+    // "um"/"uma" sozinhos antes de palavra comum continuam como artigo
+    let total = 0, atual = 0, j = i, achou = false;
+    while(j < tk.length){
+      const n = NUM_PAL[semAcento(tk[j])];
+      if(n === undefined) break;
+      achou = true;
+      if(n === 1000){ atual = (atual || 1) * 1000; total += atual; atual = 0; } else atual += n;
+      if(semAcento(tk[j + 1] || "") === "e" && NUM_PAL[semAcento(tk[j + 2] || "")] !== undefined) j += 2; else j++;
+    }
+    if(achou){ saida.push(String(total + atual)); i = j - 1; } else saida.push(tk[i]);
+  }
+  return saida.join(" ");
+}
+function dataFalada(d, m, a){
+  const h = hoje();
+  if(!a){
+    let v = isoData(h.getFullYear(), m, d);
+    if(v && dias(v) < -1) v = isoData(h.getFullYear() + 1, m, d);
+    return v;
+  }
+  return isoData(a < 100 ? a + 2000 : a, m, d);
+}
+// separa a frase falada nos campos (funciona sem internet; com a chave do Gemini o servidor confere depois)
+function entenderFala(frase, marcasConhecidas){
+  const r = { nome:"", marca:"", tam:null, qtd:0, validade:"" };
+  let t = " " + numerosFalados(String(frase || "").toLowerCase().replace(/[“”"!?;]/g, " ")) + " ";
+  t = t.replace(/(\d)\s*,\s*(\d)/g, "$1.$2").replace(/\s+/g, " ");
+  const tira = m => { t = t.replace(m, " "); };
+  // validade: "validade 10 de dezembro", "vence dia 10 do 12 de 2026", "validade março de 2027"
+  const sa = () => semAcento(t);
+  let m = new RegExp(`(?:validade|vencimento|vence|vencendo|venc)\\s*(?:e|é|em|no|na|dia|de|do|:|\\s)*(\\d{1,2})\\s*(?:\\/|-|\\.|de|do|barra|\\s)\\s*(\\d{1,2}|${RE_MES})(?:\\s*(?:\\/|-|\\.|de|do|barra|\\s)\\s*(\\d{4}|\\d{2})(?!\\d)(?!\\s*(?:g|kg|ml|l|gramas?|quilos?|litros?|unidades?)\\b))?`).exec(sa());
+  if(m){
+    const mes = MESES[m[2]] || +m[2];
+    const v = mes >= 1 && mes <= 12 ? dataFalada(+m[1], mes, m[3] ? +m[3] : 0) : "";
+    if(v){ r.validade = v; t = t.slice(0, m.index) + " " + t.slice(m.index + m[0].length); }
+  }
+  if(!r.validade){
+    m = new RegExp(`(?:validade|vencimento|vence|venc)\\s*(?:e|é|em|no|na|de|do|:|\\s)*(${RE_MES}|\\d{1,2})\\s*(?:\\/|de|do|barra|\\s)\\s*(\\d{4})`).exec(sa());
+    if(m){
+      const mes = MESES[m[1]] || +m[1];
+      if(mes >= 1 && mes <= 12){ const a = +m[2]; r.validade = isoData(a, mes, new Date(a, mes, 0).getDate()); t = t.slice(0, m.index) + " " + t.slice(m.index + m[0].length); }
+    }
+  }
+  if(!r.validade){
+    m = /(\d{1,2})\s?\/\s?(\d{1,2})\s?\/\s?(\d{4}|\d{2})(?!\d)/.exec(t);
+    if(m){ const v = dataFalada(+m[1], +m[2], +m[3]); if(v){ r.validade = v; t = t.slice(0, m.index) + " " + t.slice(m.index + m[0].length); } }
+  }
+  // tamanho: "170 gramas", "1.5 litro", "meio quilo", "um quilo e meio"
+  t = t.replace(/\bmeio\s+(quilo|kilo|kg|litro|l)\b/g, "0.5 $1");
+  t = t.replace(/(\d+)\s*(quilos?|kilos?|kg|litros?|l)\s+e\s+meio\b/g, (a, n, u) => `${n}.5 ${u}`);
+  t = t.replace(/(\d+)\s*(?:quilos?|kilos?|kg)\s+e\s+(\d{1,3})\s*(?:gramas?|gr|g)(?![a-z])/g, (a, k, g) => `${+k + g / 1000} kg`);
+  t = t.replace(/(\d+)\s*(?:litros?|l)\s+e\s+(\d{1,3})\s*(?:mililitros?|ml)(?![a-z])/g, (a, l, ml) => `${+l + ml / 1000} litros`);
+  m = /(\d+(?:\.\d+)?)\s*(quilogramas?|quilos?|kilos?|kg|gramas?|gr|g|mililitros?|ml|litros?|lts?|l)(?![a-z0-9à-ú])/.exec(t);
+  if(m){
+    let n = parseFloat(m[1]); const u0 = m[2];
+    let un = /^(quilo|kilo|kg)/.test(u0) ? "kg" : /^(mili|ml)/.test(u0) ? "ml" : /^(litro|lt|l$)/.test(u0) ? "L" : "g";
+    if(un === "kg" && n >= 50) un = "g";
+    if(un === "kg" && n < 1){ n = Math.round(n * 1000); un = "g"; }
+    if(un === "L" && n < 1){ n = Math.round(n * 1000); un = "ml"; }
+    if(n > 0){ r.tam = lerTamanho(`${n} ${un}`); t = t.slice(0, m.index) + " " + t.slice(m.index + m[0].length); }
+  }
+  // quantidade: "12 unidades", "quantidade 8", "tem 5", "3 caixas"
+  const pegaQtd = re => { const x = re.exec(t); if(x){ r.qtd = Math.min(100000, parseInt(x[1], 10)); t = t.slice(0, x.index) + " " + t.slice(x.index + x[0].length); return true; } return false; };
+  pegaQtd(/(?:quantidade|qtd|qtde|estoque|total)\s*(?:de|é|e|:|\s)*(\d+)(?:\s*(?:unidades?|unid|un|peças?|pecas?|caixas?|pacotes?|latas?|garrafas?|fardos?|potes?|sacos?|vidros?|bandejas?|itens?)\b)?/)
+    || pegaQtd(/(\d+)\s*(?:unidades?|unid|un|peças?|pecas?|caixas?|pacotes?|latas?|garrafas?|fardos?|potes?|sacos?|saquinhos?|vidros?|bandejas?|itens?|cartelas?|frascos?|caixinhas?)(?![a-zà-ú])/)
+    || pegaQtd(/(?:tem|têm|são|sao|ficaram|ficou|sobrou|sobraram)\s+(\d+)\b/);
+  // marca: "marca Nestlé" ou uma marca conhecida no meio da frase
+  m = /\bmarca\s+(?:é\s+|e\s+)?([^\d,.]+?)(?=\s+(?:tamanho|peso|quantidade|qtd|validade|vence|com|tem)\b|\s*[,.]|\s*\d|\s*$)/.exec(t);
+  if(m && m[1].trim()){
+    const palavras = m[1].trim().split(/\s+/).slice(0, 3);
+    r.marca = tituloCaso(palavras.join(" "));
+    t = t.slice(0, m.index) + " " + m[1].trim().split(/\s+/).slice(3).join(" ") + " " + t.slice(m.index + m[0].length);
+  }else{
+    const mc = acharMarca(t, marcasConhecidas);
+    if(mc){
+      r.marca = mc;
+      const alvo = semAcento(mc).replace(/[^a-z0-9']+/g, " ").trim().split(" ");
+      const tk = t.split(/\s+/).filter(Boolean), tkN = tk.map(w => semAcento(w).replace(/[^a-z0-9']+/g, ""));
+      for(let i = 0; i + alvo.length <= tk.length; i++){
+        if(alvo.every((a, k) => tkN[i + k] === a)){ tk.splice(i, alvo.length); break; }
+      }
+      t = " " + tk.join(" ") + " ";
+    }
+  }
+  // nome: o que sobrou, sem palavras de comando
+  let resto = t.replace(/\b(?:nome(?:\s+do\s+produto)?|produto|cadastrar|cadastra|anota|anotar|tamanho|peso|pesando|quantidade|qtd|marca|validade|vence|vencimento|unidades?)\b/g, " ")
+    .replace(/[,.:]+/g, " ").replace(/\s+/g, " ").trim();
+  let tk = resto.split(" ").filter(Boolean);
+  while(tk.length && (PALAVRAS_LIGA.has(tk[0]) || /^\d+$/.test(tk[0]))) tk.shift();
+  while(tk.length && (PALAVRAS_LIGA.has(tk[tk.length - 1]) || /^\d+$/.test(tk[tk.length - 1]))) tk.pop();
+  r.nome = tk.join(" ").replace(/(^|\s)(\S)/g, (a, b, c) => b + c.toUpperCase())
+    .replace(/\s(De|Do|Da|Dos|Das|Com|Sem|E|Em|Ao|À)(?=\s)/g, x => x.toLowerCase()).slice(0, 160);
+  if(!r.nome && r.marca) r.nome = r.marca;
+  return r;
+}
+
+let voz = null, iaVoz = null, vozToken = null, vozExistente = null;
+const IDS_VOZ = ["#fNome","#fMarca","#fTamNum","#fVal","#fQtd","#nlVal","#nlQtd"];
+function limparMexidos(){ IDS_VOZ.forEach(sel => { const el = $(sel); if(el) delete el.dataset.mexido; }); }
+const CAMPOS_VOZ = {
+  form: { nome:"#fNome", marca:"#fMarca", tamNum:"#fTamNum", tamUn:"#fTamUn", val:"#fVal", qtd:"#fQtd" },
+  lote: { val:"#nlVal", qtd:"#nlQtd" }
+};
+const ICONE_MIC = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/></svg>`;
+function painelVoz(destino){
+  return `<div class="voz" id="vozPainel" data-destino="${destino}" hidden>
+    <div class="voz-topo"><span class="voz-luz" aria-hidden="true"></span><b id="vozStatus">Ouvindo…</b>
+      <button class="btn btn-pri btn-peq" data-acao="pararVoz" id="vozParar">Pronto</button></div>
+    <p class="voz-fala" id="vozFala" aria-live="polite"></p>
+    <div id="vozDigitar" hidden>
+      <textarea class="campo" id="vozTexto" rows="2" placeholder="Toque no microfone do teclado e fale"></textarea>
+      <button class="btn btn-pri btn-peq btn-bloco" style="margin-top:8px" data-acao="vozPreencher">Preencher os campos</button>
+    </div>
+    <p class="dica" id="vozDica">${destino === "lote" ? "Ex.: “12 unidades, validade 10 de dezembro”" : "Ex.: “Iogurte natural Nestlé 170 gramas, 12 unidades, validade 10 de dezembro”"}</p>
+  </div>`;
+}
+function vozStatus(txt, ouvindo){
+  const s = $("#vozStatus"); if(s) s.textContent = txt;
+  const p = $("#vozPainel"); if(p) p.classList.toggle("ouvindo", !!ouvindo);
+  const b = $("#vozParar"); if(b) b.hidden = !ouvindo;
+}
+function marcasParaVoz(){ return [...new Set([...marcasAtuais().map(m => m.nome)])]; }
+function iniciarVoz(){
+  if(voz){ pararVoz(); return; }
+  const painel = $("#vozPainel"); if(!painel) return;
+  const destino = painel.dataset.destino || "form";
+  painel.hidden = false;
+  limparMexidos();
+  $("#vozFala").textContent = "";
+  if(!Reconhecedor){ mostrarDigitarFala(); return; }
+  const rec = new Reconhecedor();
+  rec.lang = "pt-BR"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+  const sessao = voz = { rec, destino, texto: "", erro: "", fim: 0, minha: Symbol() };
+  const relogio = () => { clearTimeout(sessao.silencio); sessao.silencio = setTimeout(() => { try{ rec.stop(); }catch(e){} }, 3500); };
+  rec.onresult = e => {
+    // junta os trechos; no Android cada trecho às vezes repete o anterior, então troca em vez de somar
+    const finais = []; let parcial = "";
+    for(let i = 0; i < e.results.length; i++){
+      const tx = e.results[i][0].transcript.trim();
+      if(!e.results[i].isFinal){ parcial += " " + tx; continue; }
+      const ult = finais[finais.length - 1];
+      if(ult && semAcento(tx).startsWith(semAcento(ult))) finais[finais.length - 1] = tx; else if(tx) finais.push(tx);
+    }
+    sessao.texto = (finais.join(" ") + " " + parcial).replace(/\s+/g, " ").trim();
+    const f = $("#vozFala"); if(f) f.textContent = sessao.texto;
+    if(sessao.texto) preencherPelaFala(entenderFala(sessao.texto, marcasParaVoz()), sessao.destino);
+    relogio();
+  };
+  rec.onerror = e => { sessao.erro = e.error || "falha"; };
+  rec.onend = () => { clearTimeout(sessao.silencio); clearTimeout(sessao.limite); if(voz === sessao) voz = null; terminarVoz(sessao); };
+  try{ rec.start(); }catch(e){ voz = null; mostrarDigitarFala(); return; }
+  sessao.limite = setTimeout(() => { try{ rec.stop(); }catch(e){} }, 45000);
+  relogio();
+  vozStatus(destino === "lote" ? "Ouvindo… fale a quantidade e a validade" : "Ouvindo… fale o nome, o peso e a quantidade", true);
+  const b = document.querySelector('[data-acao="falar"].btn-voz'); if(b) b.setAttribute("aria-pressed", "true");
+}
+function pararVoz(cancelar){
+  if(!voz) return;
+  const s = voz;
+  if(cancelar){ s.cancelado = true; voz = null; try{ s.rec.abort(); }catch(e){} return; }
+  try{ s.rec.stop(); }catch(e){}
+}
+function mostrarDigitarFala(motivo){
+  const painel = $("#vozPainel"); if(!painel) return;
+  painel.hidden = false;
+  vozStatus(motivo || "Este navegador não tem ditado direto. Use o microfone do teclado:", false);
+  $("#vozDigitar").hidden = false;
+  const tx = $("#vozTexto"); if(tx){ tx.value = ""; tx.focus(); }
+}
+const ERROS_VOZ = {
+  "not-allowed": "O microfone está bloqueado. Libere o microfone para este app nas configurações do navegador.",
+  "service-not-allowed": "O ditado direto não funciona aqui. Use o microfone do teclado:",
+  "audio-capture": "Não encontrei o microfone do celular.",
+  "network": "O ditado precisa de internet. Sem sinal, use o microfone do teclado:",
+  "no-speech": "Não ouvi nada. Toque em Falar e fale perto do celular."
+};
+async function terminarVoz(sessao){
+  const b = document.querySelector('[data-acao="falar"].btn-voz'); if(b) b.setAttribute("aria-pressed", "false");
+  if(sessao.cancelado || !$("#vozPainel")) return;
+  if(!sessao.texto){
+    const e = sessao.erro || "no-speech";
+    if(e === "service-not-allowed" || e === "network") return mostrarDigitarFala(ERROS_VOZ[e]);
+    vozStatus(ERROS_VOZ[e] || "Não consegui ouvir. Tente de novo.", false);
+    return;
+  }
+  await finalizarFala(sessao.texto, sessao.destino, sessao.minha);
+}
+// usado pelo ditado do teclado (quando o navegador não tem reconhecimento de voz)
+async function preencherTextoDigitado(){
+  const tx = $("#vozTexto"); const texto = tx ? tx.value.trim() : "";
+  if(!texto){ toast("Fale ou digite o produto primeiro."); if(tx) tx.focus(); return; }
+  const painel = $("#vozPainel"), destino = painel ? painel.dataset.destino : "form";
+  limparMexidos();
+  $("#vozFala").textContent = texto;
+  preencherPelaFala(entenderFala(texto, marcasParaVoz()), destino);
+  await finalizarFala(texto, destino, Symbol());
+}
+async function finalizarFala(texto, destino, minha){
+  vozToken = minha; vozExistente = null;
+  vozStatus("Conferindo o que você falou…", false);
+  const local = entenderFala(texto, marcasParaVoz());
+  let final = local;
+  if(iaVoz !== false && navigator.onLine !== false){
+    const ia = await entenderNaIA(texto);
+    if(vozToken !== minha || !$("#vozPainel")) return;
+    if(!ia.erro){
+      iaVoz = true;
+      const tamIA = ia.tamanho ? lerTamanho(`${ia.tamanho.numero} ${ia.tamanho.unidade}`) : null;
+      final = { nome: ia.nome || local.nome, marca: ia.marca || local.marca, tam: tamIA || local.tam,
+        qtd: ia.quantidade > 0 ? ia.quantidade : local.qtd, validade: dataValida(ia.validade) ? ia.validade : local.validade };
+    }else if(ia.erro === "sem_chave" || ia.erro === "sem_servidor") iaVoz = false;
+  }
+  if(vozToken !== minha || !$("#vozPainel")) return;
+  const feitos = preencherPelaFala(final, destino);
+  vozStatus(feitos.length ? `Anotei: ${feitos.join(", ")}.` : "Não entendi os dados. Tente de novo falando devagar.", false);
+  if(destino !== "form") return;
+  // produto novo sem código: já existe um com esse nome?
+  const novo = !(folhaAtual && folhaAtual.id);
+  if(novo && final.nome && !($("#fCod") && $("#fCod").value.trim())){
+    const chave = semAcento(final.nome).replace(/[^a-z0-9]+/g, " ").trim();
+    const tamTxt = final.tam ? semAcento(`${final.tam.num} ${final.tam.un}`) : "";
+    const igual = [...produtos.values()].find(p => semAcento(p.nome).replace(/[^a-z0-9]+/g, " ").trim() === chave && (!tamTxt || !p.tamanho || semAcento(p.tamanho) === tamTxt));
+    if(igual){
+      vozExistente = { id: igual.id, val: final.validade, qtd: final.qtd };
+      msgBusca(`<b>${esc(igual.nome)}</b> já está cadastrado. <button class="link" data-acao="abrirExistenteVoz">Abrir e colocar ${final.qtd ? final.qtd + " un." : "a validade"}</button>`, "aviso");
+      return;
+    }
+  }
+  const nome = $("#fNome") ? $("#fNome").value.trim() : "";
+  if(!fotoTemp && nome.length >= 3){
+    await preencherFotoPorNome(nome, ($("#fMarca") || {}).value);
+    if(folhaAtual && folhaAtual.tipo === "form") msgBusca(fotoTemp ? "Coloquei uma foto da internet. Se não for a certa, toque em outra abaixo." : "Não achei foto pelo nome. Se quiser, tire uma.", fotoTemp ? "ok-msg" : "dica");
+  }
+  if(feitos.length){
+    const falta = [];
+    if($("#fVal") && !$("#fVal").value) falta.push("a validade");
+    if(falta.length) vozStatus(`Anotei: ${feitos.join(", ")}. Falta ${falta.join(" e ")}.`, false);
+  }
+}
+async function entenderNaIA(texto){
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 14000);
+  try{
+    const r = await fetch("/api/voz", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ texto, marcas: marcasParaVoz().slice(0, 80) }), signal: ctrl.signal });
+    const j = await r.json().catch(() => null);
+    if(!r.ok || !j) return { erro: (j && j.erro) || (r.status === 404 ? "sem_servidor" : "falha") };
+    return j;
+  }catch(e){ return { erro: "rede" }; }
+  finally{ clearTimeout(t); }
+}
+// escreve nos campos o que foi entendido; não mexe no que a pessoa digitou depois de começar a falar
+function preencherPelaFala(d, destino){
+  const c = CAMPOS_VOZ[destino] || CAMPOS_VOZ.form, feitos = [];
+  const por = (sel, v, rotuloCampo) => {
+    const el = c[sel] && $(c[sel]); if(!el || el.readOnly || v === "" || v == null || el.dataset.mexido) return;
+    if(el.value !== String(v)) el.value = v;
+    el.classList.add("auto"); feitos.push(rotuloCampo);
+  };
+  por("nome", d.nome, "nome");
+  por("marca", d.marca, "marca");
+  if(d.tam && c.tamNum){
+    const el = $(c.tamNum);
+    if(el && !el.dataset.mexido){ el.value = d.tam.num; $(c.tamUn).value = d.tam.un; el.classList.add("auto"); feitos.push("tamanho"); }
+  }
+  if(d.qtd > 0) por("qtd", d.qtd, "quantidade");
+  if(dataValida(d.validade)) por("val", d.validade, "validade");
+  return feitos;
+}
+
 /* ===== detalhe ===== */
 function abrirProduto(id, focarNovaValidade){
   const p = produtos.get(id); if(!p) return;
@@ -1786,7 +2097,9 @@ function abrirProduto(id, focarNovaValidade){
       </li>`; }).join("")}</ul>` : `<p class="aviso">Nenhuma validade com estoque. Adicione abaixo.</p>`}
     ${zerados ? `<p class="zerados">${zerados} validade(s) zerada(s) escondida(s). <button class="link" data-acao="limparZerados" data-id="${esc(id)}">Apagar</button></p>` : ""}
     <div class="novo-lote ${focarNovaValidade ? "destaque" : ""}">
-      <label for="nlVal">Adicionar validade</label>
+      <div class="lote-cab"><label for="nlVal">Adicionar validade</label>
+        <button class="btn btn-sec btn-peq btn-voz" data-acao="falar" aria-pressed="false">${ICONE_MIC}Falar</button></div>
+      ${painelVoz("lote")}
       <div class="linha2">
         <input class="campo" type="date" id="nlVal" aria-label="Data de validade">
         <input class="campo" type="number" id="nlQtd" min="1" value="1" inputmode="numeric" aria-label="Quantidade">
@@ -1904,6 +2217,17 @@ document.addEventListener("click", async e => {
       break;
     }
     case "salvarForm": salvarForm(id || null); break;
+    case "falarNovo": abrirForm({ falar: true }); break;
+    case "falar": iniciarVoz(); break;
+    case "pararVoz": pararVoz(); break;
+    case "vozPreencher": preencherTextoDigitado(); break;
+    case "abrirExistenteVoz": {
+      const ex = vozExistente; if(!ex) break;
+      abrirProduto(ex.id, true);
+      if(ex.val && $("#nlVal")) $("#nlVal").value = ex.val;
+      if(ex.qtd > 0 && $("#nlQtd")) $("#nlQtd").value = ex.qtd;
+      break;
+    }
     case "menos": mudarQtd(id, b.dataset.lote, -1, !!b.dataset.det); break;
     case "mais": mudarQtd(id, b.dataset.lote, +1, !!b.dataset.det); break;
     case "abrirNovaData": abrirProduto(id, true); break;
@@ -1953,6 +2277,7 @@ document.addEventListener("change", async e => {
     verificarLembrete();
     return;
   }
+  if(e.target.id === "fTamUn"){ const n = $("#fTamNum"); if(n) n.dataset.mexido = "1"; }
   if(e.target.id === "arqBackup" && e.target.files[0]){
     const arq = e.target.files[0]; e.target.value = "";
     abrirArquivoEscolhido(arq);
@@ -1971,6 +2296,9 @@ document.addEventListener("keydown", e => {
   if(e.key !== "Enter") return;
   if(e.target.id === "codManual"){ e.preventDefault(); pararScanner().then(() => tratarCodigo(e.target.value)); }
   if(e.target.id === "nlQtd" || e.target.id === "nlVal"){ e.preventDefault(); const bt = document.querySelector('[data-acao="addLote"]'); if(bt) addLote(bt.dataset.id); }
+});
+document.addEventListener("input", e => {
+  if(e.target.id && IDS_VOZ.includes("#" + e.target.id)){ e.target.dataset.mexido = "1"; e.target.classList.remove("auto"); }
 });
 $("#busca").addEventListener("input", e => { termo = e.target.value; render(); });
 $("#busca").addEventListener("keydown", e => {
