@@ -31,6 +31,9 @@ Regras:
   "meio quilo" = 500 g; "um quilo e meio" = 1.5 kg; "meio litro" = 500 ml; "um litro e meio" = 1.5 L. Se não falou, use null.
 - "quantidade" é quantas embalagens tem no estoque (ex.: "12 unidades", "tem 5", "quantidade 8", "3 caixas"). Número inteiro. Se não falou, use 0.
 - Não confunda: em "iogurte 170 gramas 12 unidades", 170 g é o tamanho e 12 é a quantidade.
+- Um número solto, sem gramas/litros e sem ser data, é a quantidade (ex.: "iogurte 170 gramas 12" → quantidade 12). "Uma dúzia" = 12.
+- Uma data falada sem a palavra "validade" também é a validade (ex.: "10 de dezembro", "dia 10 do 12", "10/12").
+- A pessoa pode falar em partes e em qualquer ordem; junte tudo.
 - "validade": datas brasileiras são dia/mês/ano. Se falou só dia e mês, use o próximo que ainda não passou a partir de hoje.
   Se falou só mês e ano (ex.: "março de 2027"), use o último dia desse mês. Se não falou, deixe "".
 - Não invente nada que não foi falado.`;
